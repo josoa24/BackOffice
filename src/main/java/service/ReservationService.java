@@ -44,7 +44,11 @@ public class ReservationService {
     
     public List<Reservation> getAllReservations() throws SQLException {
         List<Reservation> reservations = new ArrayList<>();
-        String query = "SELECT id_reservation, id_client, nbPassager, dateHeure, id_hotel FROM reservation ORDER BY dateHeure DESC";
+        String query = "SELECT r.id_reservation, r.id_client, r.nbPassager, r.dateHeure, r.id_hotel, " +
+                      "h.nom as hotel_nom " +
+                      "FROM reservation r " +
+                      "LEFT JOIN hotel h ON r.id_hotel = h.id_hotel " +
+                      "ORDER BY r.dateHeure DESC";
         
         try (Connection conn = DatabaseConnection.getConnection();
              Statement stmt = conn.createStatement();
@@ -57,6 +61,13 @@ public class ReservationService {
                 reservation.setNbPassager(rs.getInt("nbPassager"));
                 reservation.setDateHeure(rs.getTimestamp("dateHeure").toLocalDateTime());
                 reservation.setIdHotel(rs.getInt("id_hotel"));
+                
+                // Créer et associer l'objet Hotel
+                entity.Hotel hotel = new entity.Hotel();
+                hotel.setIdHotel(rs.getInt("id_hotel"));
+                hotel.setNom(rs.getString("hotel_nom"));
+                reservation.setHotel(hotel);
+                
                 reservations.add(reservation);
             }
         }
@@ -66,10 +77,12 @@ public class ReservationService {
     
     public List<Reservation> getReservationsByDate(LocalDate date) throws SQLException {
         List<Reservation> reservations = new ArrayList<>();
-        String query = "SELECT id_reservation, id_client, nbPassager, dateHeure, id_hotel " +
-                      "FROM reservation " +
-                      "WHERE DATE(dateHeure) = ? " +
-                      "ORDER BY dateHeure";
+        String query = "SELECT r.id_reservation, r.id_client, r.nbPassager, r.dateHeure, r.id_hotel, " +
+                      "h.nom as hotel_nom " +
+                      "FROM reservation r " +
+                      "LEFT JOIN hotel h ON r.id_hotel = h.id_hotel " +
+                      "WHERE DATE(r.dateHeure) = ? " +
+                      "ORDER BY r.dateHeure";
         
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement pstmt = conn.prepareStatement(query)) {
@@ -84,6 +97,13 @@ public class ReservationService {
                     reservation.setNbPassager(rs.getInt("nbPassager"));
                     reservation.setDateHeure(rs.getTimestamp("dateHeure").toLocalDateTime());
                     reservation.setIdHotel(rs.getInt("id_hotel"));
+                    
+                    // Créer et associer l'objet Hotel
+                    entity.Hotel hotel = new entity.Hotel();
+                    hotel.setIdHotel(rs.getInt("id_hotel"));
+                    hotel.setNom(rs.getString("hotel_nom"));
+                    reservation.setHotel(hotel);
+                    
                     reservations.add(reservation);
                 }
             }
@@ -93,8 +113,11 @@ public class ReservationService {
     }
     
     public Reservation getReservationById(int idReservation) throws SQLException {
-        String query = "SELECT id_reservation, id_client, nbPassager, dateHeure, id_hotel " +
-                      "FROM reservation WHERE id_reservation = ?";
+        String query = "SELECT r.id_reservation, r.id_client, r.nbPassager, r.dateHeure, r.id_hotel, " +
+                      "h.nom as hotel_nom " +
+                      "FROM reservation r " +
+                      "LEFT JOIN hotel h ON r.id_hotel = h.id_hotel " +
+                      "WHERE r.id_reservation = ?";
         
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement pstmt = conn.prepareStatement(query)) {
@@ -109,6 +132,13 @@ public class ReservationService {
                     reservation.setNbPassager(rs.getInt("nbPassager"));
                     reservation.setDateHeure(rs.getTimestamp("dateHeure").toLocalDateTime());
                     reservation.setIdHotel(rs.getInt("id_hotel"));
+                    
+                    // Créer et associer l'objet Hotel
+                    entity.Hotel hotel = new entity.Hotel();
+                    hotel.setIdHotel(rs.getInt("id_hotel"));
+                    hotel.setNom(rs.getString("hotel_nom"));
+                    reservation.setHotel(hotel);
+                    
                     return reservation;
                 }
             }
