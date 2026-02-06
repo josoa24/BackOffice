@@ -1,0 +1,31 @@
+Table reservation: id_reservation, id_client(4chiffre),nbPassager,dateHeurre,id_hotel (PK)
+hotel : id_hotel, nom 
+BackOffice: Formulaire pour inserer reservation
+script d'inscription hotel
+FrontOffice : recherche par date des listes des reservations
+
+06-02-2026 - Sprint 1
+BackOffice (Fanilo ):
+Entités à  créer dans entity :
+Reservation.java 
+Hotel.java 
+
+Page à creer : 
+Reservation-form.jsp : 
+    champs : id_client(4chiffre),nbPassager,dateHeurre,id_hotel (PK)
+
+Fonction à creer :
+    Reservation enregistrerReservation(Long idClient ,Long nbPassager ,DateTime dateheure,Long idHotel)
+     
+    (Api) List<Reservation> getAllReservation()
+    (Api) List<Reservation> getReservationsByDate(Date date)
+
+FrontOffice  (Bijou):
+
+Entités à creer :
+
+Pages à créer  :
+    Reservation-list.html (avec une filtre de recherche par date)
+        Informlation à afficher : id_client(4chiffre),nbPassager,dateHeurre,id_hotel (PK)
+
+
