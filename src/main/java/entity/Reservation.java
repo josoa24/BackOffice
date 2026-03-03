@@ -8,7 +8,6 @@ public class Reservation {
     private int nbPassager;
     private LocalDateTime dateHeure;
     private int idHotel;
-    private Hotel hotel;
 
     public Reservation() {
     }
@@ -62,14 +61,6 @@ public class Reservation {
 
     public void setIdHotel(int idHotel) {
         this.idHotel = idHotel;
-    }
-
-    public Hotel getHotel() {
-        return hotel;
-    }
-
-    public void setHotel(Hotel hotel) {
-        this.hotel = hotel;
     }
 
     @Override
