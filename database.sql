@@ -16,3 +16,18 @@ CREATE TABLE reservation (
 CREATE INDEX idx_reservation_date ON reservation(dateHeure);
 
 CREATE INDEX idx_reservation_hotel ON reservation(id_hotel);
+
+CREATE TABLE Vehicule BIGINT
+id_vehicule,reference,place, type_vehicule
+
+
+create table Token (
+    id_token SERIAL PRIMARY KEY,
+    token VARCHAR(255) NOT NULL UNIQUE,
+    date_expiration TIMESTAMP NOT NULL,
+    id_client INTEGER NOT NULL,
+    CONSTRAINT chk_token_client CHECK (id_client >= 1000 AND id_client <= 9999)
+);
+
+CREATE INDEX idx_token_value ON token(token);
+CREATE INDEX idx_token_expiration ON token(date_expiration);

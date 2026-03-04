@@ -33,3 +33,22 @@ Entités à créer :
 Pages à créer :
 - Reservation-list.html (avec filtre de recherche par date)
     - Informations à afficher : id_client (4 chiffres), nbPassager, dateHeure, id_hotel (PK)
+
+09-02-2026
+BackOffice 
+    Verification TOKEN pour les rezquetes listes des reservations
+    Si expirer aussi
+
+13-02-2026 Sprint-2
+Vitesse moyenne :
+Temps d'attente : 
+Ajouter Aeroport dans Hotel 
+Table Hotel => (id , code , libelle)
+Table Distance => (from , to , distance)*
+
+BackOffice :
+Formulaire mandray parametre date , clique , page identification (fiassignena vehicule  amin'ny reservation, miaraka amin'ny heure de depart , et arrive aeroport )
+
+Tsy maintsy izay manana capacite ou plus nombre passager no assignena amin'ny reservation
+raha ohatra ka maromaro no plus nombre passager dia izay akaiky indrindra ny isany no isignena
+raha mbola misy maromaro mitovy dia izay diesel no assignena

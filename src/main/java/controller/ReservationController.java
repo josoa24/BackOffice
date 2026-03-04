@@ -4,12 +4,15 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 
 import entity.Reservation;
 import entity.Hotel;
+import entity.Token;
 import service.HotelService;
 import service.ReservationService;
+import service.TokenService;
 import main.annotation.ControllerAnnotation;
 import main.annotation.UrlAnnotation;
 import main.annotation.GetMapping;
@@ -22,6 +25,7 @@ public class ReservationController {
     
     private HotelService hotelService = new HotelService();
     private ReservationService reservationService = new ReservationService();
+    private TokenService tokenService = new TokenService();
 
     @GetMapping
     @UrlAnnotation(url = "/reservation-form")
@@ -84,10 +88,23 @@ public class ReservationController {
     @main.annotation.Json
     @GetMapping
     @UrlAnnotation(url = "/api/reservations")
-    public ModelView getAllReservations() {
+    public ModelView getAllReservations(@RequestParam(paramName = "token") String token) {
         ModelView mv = new ModelView();
         
         try {
+            // Vérification du token
+            Token validToken = tokenService.validateToken(token);
+            if (validToken == null) {
+                if (tokenService.isTokenExpired(token)) {
+                    mv.setData("error", "Token expiré. Veuillez vous reconnecter.");
+                } else {
+                    mv.setData("error", "Token invalide. Accès refusé.");
+                }
+                mv.setData("reservations", new ArrayList<Reservation>());
+                mv.setData("count", 0);
+                return mv;
+            }
+
             List<Reservation> reservations = reservationService.getAllReservations();
             mv.setData("reservations", reservations);
             mv.setData("count", reservations.size());
@@ -103,10 +120,25 @@ public class ReservationController {
     @main.annotation.Json
     @GetMapping
     @UrlAnnotation(url = "/api/reservations/date")
-    public ModelView getReservationsByDate(@RequestParam(paramName = "date") String date) {
+    public ModelView getReservationsByDate(
+            @RequestParam(paramName = "date") String date,
+            @RequestParam(paramName = "token") String token) {
         ModelView mv = new ModelView();
         
         try {
+            // Vérification du token
+            Token validToken = tokenService.validateToken(token);
+            if (validToken == null) {
+                if (tokenService.isTokenExpired(token)) {
+                    mv.setData("error", "Token expiré. Veuillez vous reconnecter.");
+                } else {
+                    mv.setData("error", "Token invalide. Accès refusé.");
+                }
+                mv.setData("reservations", new ArrayList<Reservation>());
+                mv.setData("count", 0);
+                return mv;
+            }
+
             DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
             LocalDate localDate = LocalDate.parse(date, formatter);
             List<Reservation> reservations = reservationService.getReservationsByDate(localDate);
@@ -117,6 +149,54 @@ public class ReservationController {
             mv.setData("error", "Erreur: " + e.getMessage());
             mv.setData("reservations", new ArrayList<Reservation>());
             mv.setData("count", 0);
+        }
+        
+        return mv;
+    }
+
+    @main.annotation.Json
+    @GetMapping
+    @UrlAnnotation(url = "/api/token/generate")
+    public ModelView generateToken(@RequestParam(paramName = "idClient") int idClient) {
+        ModelView mv = new ModelView();
+        
+        try {
+            // Génère un token valide pendant 30 minutes
+            Token token = tokenService.generateToken(idClient, 30);
+            mv.setData("token", token.getToken());
+            mv.setData("expiration", token.getDateExpiration().toString());
+            mv.setData("idClient", token.getIdClient());
+            mv.setData("message", "Token généré avec succès");
+        } catch (Exception e) {
+            mv.setData("error", "Erreur lors de la génération du token: " + e.getMessage());
+        }
+        
+        return mv;
+    }
+
+    @main.annotation.Json
+    @GetMapping
+    @UrlAnnotation(url = "/api/token/validate")
+    public ModelView validateToken(@RequestParam(paramName = "token") String tokenValue) {
+        ModelView mv = new ModelView();
+        
+        try {
+            Token token = tokenService.validateToken(tokenValue);
+            if (token != null) {
+                mv.setData("valid", true);
+                mv.setData("idClient", token.getIdClient());
+                mv.setData("expiration", token.getDateExpiration().toString());
+            } else {
+                mv.setData("valid", false);
+                if (tokenService.isTokenExpired(tokenValue)) {
+                    mv.setData("message", "Token expiré");
+                } else {
+                    mv.setData("message", "Token invalide");
+                }
+            }
+        } catch (Exception e) {
+            mv.setData("error", "Erreur: " + e.getMessage());
+            mv.setData("valid", false);
         }
         
         return mv;
