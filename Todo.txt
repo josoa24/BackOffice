@@ -39,7 +39,7 @@ BackOffice
     Verification TOKEN pour les rezquetes listes des reservations
     Si expirer aussi
 
-13-02-2026 Sprint-2
+13-02-2026 Sprint-3
 Vitesse moyenne :
 Temps d'attente : 
 Ajouter Aeroport dans Hotel 

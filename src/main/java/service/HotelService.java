@@ -14,7 +14,7 @@ public class HotelService {
     
     public List<Hotel> getAllHotels() throws SQLException {
         List<Hotel> hotels = new ArrayList<>();
-        String query = "SELECT id_hotel, nom FROM hotel ORDER BY id_hotel";
+        String query = "SELECT id_hotel, nom, code, libelle FROM hotel ORDER BY id_hotel";
         
         try (Connection conn = DatabaseConnection.getConnection();
              Statement stmt = conn.createStatement();
@@ -24,6 +24,8 @@ public class HotelService {
                 Hotel hotel = new Hotel();
                 hotel.setIdHotel(rs.getInt("id_hotel"));
                 hotel.setNom(rs.getString("nom"));
+                hotel.setCode(rs.getString("code"));
+                hotel.setLibelle(rs.getString("libelle"));
                 hotels.add(hotel);
             }
         }
@@ -32,7 +34,7 @@ public class HotelService {
     }
     
     public Hotel getHotelById(int idHotel) throws SQLException {
-        String query = "SELECT id_hotel, nom FROM hotel WHERE id_hotel = ?";
+        String query = "SELECT id_hotel, nom, code, libelle FROM hotel WHERE id_hotel = ?";
         
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement pstmt = conn.prepareStatement(query)) {
@@ -44,6 +46,8 @@ public class HotelService {
                     Hotel hotel = new Hotel();
                     hotel.setIdHotel(rs.getInt("id_hotel"));
                     hotel.setNom(rs.getString("nom"));
+                    hotel.setCode(rs.getString("code"));
+                    hotel.setLibelle(rs.getString("libelle"));
                     return hotel;
                 }
             }
