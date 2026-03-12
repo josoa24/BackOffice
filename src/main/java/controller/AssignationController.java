@@ -123,15 +123,20 @@ public class AssignationController {
             // Récupérer toutes les assignations (anciennes + nouvelles)
             List<Assignation> toutesAssignations = assignationService.getAssignationsByDate(date);
 
+            // Récupérer les réservations non assignées (après planification)
+            List<Reservation> restantes = assignationService.getReservationsNonAssignees(date);
+
             mv.setData("date", dateStr);
             mv.setData("assignations", toutesAssignations);
             mv.setData("nouvellesAssignations", nouvelles.size());
+            mv.setData("reservationsNonAssignees", restantes);
             mv.setData("message", nouvelles.size() + " réservation(s) assignée(s) automatiquement avec succès!");
 
         } catch (Exception e) {
             mv.setData("error", "Erreur lors de la planification: " + e.getMessage());
             mv.setData("date", dateStr != null ? dateStr : "");
             mv.setData("assignations", new ArrayList<Assignation>());
+            mv.setData("reservationsNonAssignees", new ArrayList<Reservation>());
             mv.setData("nouvellesAssignations", 0);
         }
 

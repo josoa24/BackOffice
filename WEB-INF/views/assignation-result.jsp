@@ -1,6 +1,7 @@
 <%@ page contentType="text/html;charset=UTF-8" language="java" %>
 <%@ page import="java.util.List,java.util.Map,java.util.LinkedHashMap,java.util.ArrayList" %>
 <%@ page import="entity.Assignation" %>
+<%@ page import="entity.Reservation" %>
 <%@ page import="java.time.format.DateTimeFormatter" %>
 <!DOCTYPE html>
 <html lang="fr">
@@ -26,13 +27,14 @@
         .header-date { display: flex; align-items: center; gap: 8px; background: #f8f9fe; padding: 10px 18px; border-radius: 10px; font-size: 13px; color: #5a6178; font-weight: 600; border: 1px solid #e8eaf4; }
         .header-date i { color: #10b981; }
 
-        .kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-bottom: 28px; }
+        .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-bottom: 28px; }
         .kpi-card { background: #fff; border-radius: 16px; padding: 24px; border: 1px solid #eef0f6; transition: all 0.3s; }
         .kpi-card:hover { transform: translateY(-4px); box-shadow: 0 12px 32px rgba(0,0,0,0.08); }
         .kpi-icon-wrap { width: 48px; height: 48px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 20px; margin-bottom: 16px; }
         .kpi-icon-wrap.blue { background: linear-gradient(135deg, #dbeafe, #bfdbfe); color: #2563eb; }
         .kpi-icon-wrap.green { background: linear-gradient(135deg, #d1fae5, #a7f3d0); color: #059669; }
         .kpi-icon-wrap.amber { background: linear-gradient(135deg, #fef3c7, #fde68a); color: #d97706; }
+        .kpi-icon-wrap.red { background: linear-gradient(135deg, #fee2e2, #fecaca); color: #dc2626; }
         .kpi-value { font-size: 32px; font-weight: 900; color: #1e1e2d; line-height: 1; margin-bottom: 6px; }
         .kpi-label { font-size: 13px; color: #9ba4b5; font-weight: 500; }
 
@@ -107,6 +109,15 @@
     int existantes = totalAssignations - nouvellesCount;
     if (existantes < 0) existantes = 0;
 
+    List<Reservation> reservationsNonAssignees = (List<Reservation>) request.getAttribute("reservationsNonAssignees");
+    int nbNonAssignees = reservationsNonAssignees != null ? reservationsNonAssignees.size() : 0;
+    int totalPassagersNonAssignes = 0;
+    if (reservationsNonAssignees != null) {
+        for (Reservation rna : reservationsNonAssignees) {
+            totalPassagersNonAssignes += rna.getNbPassager();
+        }
+    }
+
     // Grouper les assignations par vehicule (pour affichage Sprint 4)
     Map<Integer, List<Assignation>> parVehicule = new LinkedHashMap<>();
     if (assignations != null) {
@@ -173,7 +184,58 @@
                 <div class="kpi-value"><%= parVehicule.size() %></div>
                 <div class="kpi-label">Vehicules utilises</div>
             </div>
+            <div class="kpi-card">
+                <div class="kpi-icon-wrap red"><i class="fas fa-user-xmark"></i></div>
+                <div class="kpi-value"><%= nbNonAssignees %></div>
+                <div class="kpi-label">Non assignees (<%= totalPassagersNonAssignes %> passagers)</div>
+            </div>
         </div>
+
+        <% if (nbNonAssignees > 0) { %>
+        <!-- Reservations non assignees -->
+        <div class="card anim" style="border-left: 4px solid #dc3545;">
+            <div class="card-header-custom">
+                <div class="card-title">
+                    <span class="title-dot" style="background:#dc3545"></span>
+                    Reservations Non Assignees
+                </div>
+                <span class="card-badge" style="background:#fef2f2; color:#dc3545; border-color:#fecdd3;"><%= nbNonAssignees %> reservation(s) - <%= totalPassagersNonAssignes %> passager(s)</span>
+            </div>
+            <div class="card-body-custom">
+                <div class="alert-custom alert-error-custom" style="margin-bottom:16px;">
+                    <i class="fas fa-exclamation-triangle" style="font-size:18px"></i>
+                    <span><strong>Attention :</strong> Ces reservations n'ont pas pu etre assignees (capacite vehicules insuffisante).</span>
+                </div>
+                <table class="table-modern">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Client</th>
+                            <th>Passagers</th>
+                            <th>Lieu (Hotel)</th>
+                            <th>Date / Heure</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <% for (Reservation rna : reservationsNonAssignees) { %>
+                        <tr>
+                            <td><span class="badge-custom badge-id">#<%= rna.getIdReservation() %></span></td>
+                            <td><strong><%= rna.getIdClient() %></strong></td>
+                            <td><strong style="color:#dc3545;"><%= rna.getNbPassager() %></strong></td>
+                            <td>
+                                <span class="badge-hotel">
+                                    <i class="fas fa-map-marker-alt"></i>
+                                    <%= rna.getHotel() != null ? rna.getHotel().getNom() : rna.getIdHotel() %>
+                                </span>
+                            </td>
+                            <td><%= rna.getDateHeure().format(dateTimeFormatter) %></td>
+                        </tr>
+                        <% } %>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <% } %>
 
         <!-- Regroupement par vehicule (Sprint 4) -->
         <div class="card anim">

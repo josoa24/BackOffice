@@ -191,30 +191,15 @@ public class AssignationService {
             int idHotel = entry.getKey();
             List<Reservation> groupeReservations = entry.getValue();
 
-            // Calculer le total de passagers pour ce groupe (Sprint 4 : inséparables)
+            // Calculer le total de passagers pour ce groupe
             int totalPassagers = 0;
             for (Reservation r : groupeReservations) {
                 totalPassagers += r.getNbPassager();
             }
 
-            // 8. Trouver le meilleur véhicule DÉDIÉ à ce groupe
-            Vehicule meilleurVehicule = trouverMeilleurVehicule(totalPassagers,
-                    tousVehicules, vehiculesDejaUtilises, vehiculesAssignesCetteExecution);
-
-            if (meilleurVehicule == null) {
-                System.err.println("Aucun véhicule disponible pour " + totalPassagers +
-                        " passagers vers l'hôtel " + idHotel);
-                continue;
-            }
-
-            // Marquer ce véhicule comme utilisé (il ne sera plus disponible pour une autre
-            // destination)
-            vehiculesAssignesCetteExecution.add(meilleurVehicule.getIdVehicule());
-
-            // 9. Calculer les heures de départ et d'arrivée
+            // 9. Calculer les heures de départ et d'arrivée (commun à tous les véhicules du
+            // groupe)
             double distanceKm = distancesMap.getOrDefault(idHotel, 0.0);
-
-            // L'heure de départ = heure du premier client du groupe + temps d'attente
             LocalDateTime premiereDateHeure = groupeReservations.get(0).getDateHeure();
             for (Reservation r : groupeReservations) {
                 if (r.getDateHeure().isBefore(premiereDateHeure)) {
@@ -222,21 +207,100 @@ public class AssignationService {
                 }
             }
             LocalDateTime heureDepart = premiereDateHeure.plusMinutes(tempsAttente);
-
-            // Temps de route = (distance / vitesse) * 60 minutes
             int tempsRouteMinutes = (int) Math.ceil((distanceKm / vitesse) * 60);
             LocalDateTime heureArrivee = heureDepart.plusMinutes(tempsRouteMinutes);
 
-            // 10. Assigner toutes les réservations du groupe à ce véhicule
-            for (Reservation r : groupeReservations) {
-                Assignation assignation = enregistrerAssignation(
-                        r.getIdReservation(),
-                        meilleurVehicule.getIdVehicule(),
-                        heureDepart,
-                        heureArrivee);
-                assignation.setReservation(r);
-                assignation.setVehicule(meilleurVehicule);
-                nouvellesAssignations.add(assignation);
+            // 8. Trouver le meilleur véhicule pour TOUT le groupe d'abord
+            Vehicule meilleurVehicule = trouverMeilleurVehicule(totalPassagers,
+                    tousVehicules, vehiculesDejaUtilises, vehiculesAssignesCetteExecution);
+
+            if (meilleurVehicule != null) {
+                // CAS SIMPLE : un seul véhicule suffit pour tout le groupe
+                vehiculesAssignesCetteExecution.add(meilleurVehicule.getIdVehicule());
+
+                for (Reservation r : groupeReservations) {
+                    Assignation assignation = enregistrerAssignation(
+                            r.getIdReservation(),
+                            meilleurVehicule.getIdVehicule(),
+                            heureDepart,
+                            heureArrivee);
+                    assignation.setReservation(r);
+                    assignation.setVehicule(meilleurVehicule);
+                    nouvellesAssignations.add(assignation);
+                }
+            } else {
+                // CAS SPRINT 4 : aucun véhicule ne peut prendre tout le groupe
+                // Répartir les réservations sur plusieurs véhicules
+                // Trier les réservations par nbPassager décroissant (gros d'abord)
+                List<Reservation> restantes = new ArrayList<>(groupeReservations);
+                restantes.sort((a, b) -> Integer.compare(b.getNbPassager(), a.getNbPassager()));
+
+                while (!restantes.isEmpty()) {
+                    // Calculer le total des restants
+                    int totalRestant = 0;
+                    for (Reservation r : restantes) {
+                        totalRestant += r.getNbPassager();
+                    }
+
+                    // D'abord essayer de trouver un véhicule qui prend TOUS les restants
+                    Vehicule vehicule = trouverMeilleurVehicule(totalRestant,
+                            tousVehicules, vehiculesDejaUtilises, vehiculesAssignesCetteExecution);
+
+                    if (vehicule != null) {
+                        // Tous les restants tiennent dans un seul véhicule
+                        vehiculesAssignesCetteExecution.add(vehicule.getIdVehicule());
+                        for (Reservation r : restantes) {
+                            Assignation assignation = enregistrerAssignation(
+                                    r.getIdReservation(),
+                                    vehicule.getIdVehicule(),
+                                    heureDepart,
+                                    heureArrivee);
+                            assignation.setReservation(r);
+                            assignation.setVehicule(vehicule);
+                            nouvellesAssignations.add(assignation);
+                        }
+                        restantes.clear();
+                    } else {
+                        // Sinon, prendre le plus grand véhicule et le remplir au max
+                        vehicule = trouverPlusGrandVehiculeDisponible(
+                                tousVehicules, vehiculesDejaUtilises, vehiculesAssignesCetteExecution);
+
+                        if (vehicule == null) {
+                            System.err.println("Plus aucun véhicule disponible pour " + totalRestant +
+                                    " passagers restants vers l'hôtel " + idHotel);
+                            break;
+                        }
+
+                        vehiculesAssignesCetteExecution.add(vehicule.getIdVehicule());
+                        int capaciteVehicule = vehicule.getCapacite();
+
+                        // Remplir ce véhicule avec autant de réservations que possible
+                        List<Reservation> assigneesACeVehicule = new ArrayList<>();
+                        int passagersDansVehicule = 0;
+
+                        Iterator<Reservation> it = restantes.iterator();
+                        while (it.hasNext()) {
+                            Reservation r = it.next();
+                            if (passagersDansVehicule + r.getNbPassager() <= capaciteVehicule) {
+                                assigneesACeVehicule.add(r);
+                                passagersDansVehicule += r.getNbPassager();
+                                it.remove();
+                            }
+                        }
+
+                        // Enregistrer les assignations pour ce véhicule
+                        for (Reservation r : assigneesACeVehicule) {
+                            Assignation assignation = enregistrerAssignation(
+                                    r.getIdReservation(),
+                                    vehicule.getIdVehicule(),
+                                    heureDepart,
+                                    heureArrivee);
+                            assignation.setReservation(r);
+                            assignation.setVehicule(vehicule);
+                            nouvellesAssignations.add(assignation);
+                        }
+                    }
+                }
             }
         }
 
@@ -330,6 +394,42 @@ public class AssignationService {
         }
 
         return premier;
+    }
+
+    /**
+     * Sprint 4 : Trouver le plus grand véhicule disponible
+     * Utilisé quand aucun véhicule ne peut prendre tout le groupe
+     * Règles : plus grande capacité, priorité diesel, random si égalité
+     */
+    private Vehicule trouverPlusGrandVehiculeDisponible(
+            List<Vehicule> tousVehicules,
+            Set<Integer> vehiculesDejaUtilises,
+            Set<Integer> vehiculesAssignesCetteExecution) {
+
+        List<Vehicule> candidats = new ArrayList<>();
+        for (Vehicule v : tousVehicules) {
+            if (!vehiculesDejaUtilises.contains(v.getIdVehicule())
+                    && !vehiculesAssignesCetteExecution.contains(v.getIdVehicule())) {
+                candidats.add(v);
+            }
+        }
+
+        if (candidats.isEmpty()) {
+            return null;
+        }
+
+        // Trier par capacité décroissante, puis diesel, puis random
+        candidats.sort((a, b) -> {
+            if (a.getCapacite() != b.getCapacite())
+                return Integer.compare(b.getCapacite(), a.getCapacite());
+            boolean dieselA = "diesel".equalsIgnoreCase(a.getCarburant());
+            boolean dieselB = "diesel".equalsIgnoreCase(b.getCarburant());
+            if (dieselA != dieselB)
+                return dieselA ? -1 : 1;
+            return 0;
+        });
+
+        return candidats.get(0);
     }
 
     /**
