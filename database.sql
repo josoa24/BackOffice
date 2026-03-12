@@ -17,9 +17,12 @@ CREATE INDEX idx_reservation_date ON reservation(dateHeure);
 
 CREATE INDEX idx_reservation_hotel ON reservation(id_hotel);
 
-CREATE TABLE Vehicule BIGINT
-id_vehicule,reference,place, type_vehicule
-
+CREATE TABLE Vehicule (
+    id_vehicule BIGINT PRIMARY KEY,
+    reference VARCHAR(255) NOT NULL,
+    place INTEGER NOT NULL,
+    type_vehicule VARCHAR(255) NOT NULL
+);
 
 create table Token (
     id_token SERIAL PRIMARY KEY,

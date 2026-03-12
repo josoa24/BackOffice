@@ -5,6 +5,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -17,8 +18,8 @@ public class VehiculeService {
         String query = "SELECT id_vehicule, marque, modele, immatriculation, capacite, carburant FROM vehicule ORDER BY capacite";
 
         try (Connection conn = DatabaseConnection.getConnection();
-             Statement stmt = conn.createStatement();
-             ResultSet rs = stmt.executeQuery(query)) {
+                Statement stmt = conn.createStatement();
+                ResultSet rs = stmt.executeQuery(query)) {
 
             while (rs.next()) {
                 Vehicule v = new Vehicule();
@@ -36,22 +37,24 @@ public class VehiculeService {
     }
 
     /**
-     * Trouver le meilleur véhicule pour une réservation selon les règles :
+     * Sprint 3 : Trouver le meilleur véhicule pour un nombre de passagers
+     * Règles :
      * 1. Capacité >= nbPassager
-     * 2. Si plusieurs : celui dont la capacité est la plus proche du nombre de passagers
-     * 3. Si encore égalité : celui qui est diesel
+     * 2. Capacité la plus proche du nombre de passagers
+     * 3. Priorité Diesel
+     * 4. Si encore égalité Diesel : random (via ORDER BY RANDOM())
      */
     public Vehicule trouverMeilleurVehicule(int nbPassager) throws SQLException {
-        // Requête ordonnée : capacité >= nbPassager, trié par capacité ASC puis diesel en priorité
         String query = "SELECT id_vehicule, marque, modele, immatriculation, capacite, carburant " +
-                       "FROM vehicule " +
-                       "WHERE capacite >= ? " +
-                       "ORDER BY capacite ASC, " +
-                       "CASE WHEN carburant = 'diesel' THEN 0 ELSE 1 END ASC " +
-                       "LIMIT 1";
+                "FROM vehicule " +
+                "WHERE capacite >= ? " +
+                "ORDER BY capacite ASC, " +
+                "CASE WHEN carburant = 'diesel' THEN 0 ELSE 1 END ASC, " +
+                "RANDOM() " +
+                "LIMIT 1";
 
         try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(query)) {
+                PreparedStatement pstmt = conn.prepareStatement(query)) {
 
             pstmt.setInt(1, nbPassager);
 
@@ -69,30 +72,33 @@ public class VehiculeService {
             }
         }
 
-        return null; // Aucun véhicule disponible
+        return null;
     }
 
     /**
-     * Trouver le meilleur véhicule disponible (non déjà assigné à cette heure)
+     * Sprint 4 : Trouver le meilleur véhicule en tenant compte de la capacité
+     * restante
+     * Un véhicule peut avoir plusieurs réservations tant que la capacité n'est pas
+     * dépassée
      */
-    public Vehicule trouverMeilleurVehiculeDisponible(int nbPassager, java.time.LocalDateTime dateHeure) throws SQLException {
-        String query = "SELECT v.id_vehicule, v.marque, v.modele, v.immatriculation, v.capacite, v.carburant " +
-                       "FROM vehicule v " +
-                       "WHERE v.capacite >= ? " +
-                       "AND v.id_vehicule NOT IN (" +
-                       "    SELECT a.id_vehicule FROM assignation a " +
-                       "    JOIN reservation r ON a.id_reservation = r.id_reservation " +
-                       "    WHERE DATE(r.dateHeure) = DATE(?) " +
-                       ") " +
-                       "ORDER BY v.capacite ASC, " +
-                       "CASE WHEN v.carburant = 'diesel' THEN 0 ELSE 1 END ASC " +
-                       "LIMIT 1";
+    public Vehicule trouverMeilleurVehiculeDisponible(int nbPassager, LocalDate date) throws SQLException {
+        String query = "SELECT v.id_vehicule, v.marque, v.modele, v.immatriculation, v.capacite, v.carburant, " +
+                "(v.capacite - COALESCE(SUM(r.nbPassager), 0)) as places_restantes " +
+                "FROM vehicule v " +
+                "LEFT JOIN assignation a ON v.id_vehicule = a.id_vehicule AND DATE(a.heure_depart) = ? " +
+                "LEFT JOIN reservation r ON a.id_reservation = r.id_reservation " +
+                "GROUP BY v.id_vehicule, v.marque, v.modele, v.immatriculation, v.capacite, v.carburant " +
+                "HAVING (v.capacite - COALESCE(SUM(r.nbPassager), 0)) >= ? " +
+                "ORDER BY (v.capacite - COALESCE(SUM(r.nbPassager), 0)) ASC, " +
+                "CASE WHEN v.carburant = 'diesel' THEN 0 ELSE 1 END ASC, " +
+                "RANDOM() " +
+                "LIMIT 1";
 
         try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(query)) {
+                PreparedStatement pstmt = conn.prepareStatement(query)) {
 
-            pstmt.setInt(1, nbPassager);
-            pstmt.setTimestamp(2, java.sql.Timestamp.valueOf(dateHeure));
+            pstmt.setDate(1, java.sql.Date.valueOf(date));
+            pstmt.setInt(2, nbPassager);
 
             try (ResultSet rs = pstmt.executeQuery()) {
                 if (rs.next()) {
