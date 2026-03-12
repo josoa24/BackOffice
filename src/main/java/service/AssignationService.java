@@ -109,6 +109,27 @@ public class AssignationService {
     }
 
     /**
+     * Pré-charger TOUTES les distances depuis l'aéroport en une seule requête
+     * Evite les problèmes de connexion lors des appels multiples
+     */
+    private Map<Integer, Double> chargerDistancesDepuisAeroport() throws SQLException {
+        Map<Integer, Double> distances = new HashMap<>();
+        String query = "SELECT id_to, distance_km FROM distance WHERE id_from = ?";
+
+        Connection conn = DatabaseConnection.getConnection();
+        PreparedStatement pstmt = conn.prepareStatement(query);
+        pstmt.setInt(1, ID_AEROPORT);
+        ResultSet rs = pstmt.executeQuery();
+        while (rs.next()) {
+            distances.put(rs.getInt("id_to"), rs.getDouble("distance_km"));
+        }
+        rs.close();
+        pstmt.close();
+
+        return distances;
+    }
+
+    /**
      * ALGORITHME PRINCIPAL - Sprint 3 + Sprint 4
      * Assigner automatiquement des véhicules aux réservations d'une date donnée
      *
@@ -118,8 +139,8 @@ public class AssignationService {
      * 3. Véhicule dont le nombre de places est le plus proche du nombre de clients
      * 4. Si plusieurs véhicules : priorité Diesel
      * 5. Si encore égalité Diesel : choix aléatoire (random)
-     * 6. Sprint 4 : Un véhicule peut avoir plusieurs réservations (capacité
-     * partagée)
+     * 6. Sprint 4 : Un véhicule peut avoir plusieurs réservations pour le MÊME
+     * hôtel
      */
     public List<Assignation> assignerVehiculesParDate(LocalDate date) throws SQLException {
         List<Assignation> nouvellesAssignations = new ArrayList<>();
@@ -130,47 +151,55 @@ public class AssignationService {
             return nouvellesAssignations;
         }
 
-        // 2. Grouper les réservations par hôtel (clients inséparables = même
+        // 2. Pré-charger TOUTES les distances en une seule requête (évite les problèmes
+        // de connexion)
+        Map<Integer, Double> distancesMap = chargerDistancesDepuisAeroport();
+
+        // 3. Charger les paramètres une seule fois
+        Map<String, Integer> params = parametreService.getParametres();
+        int vitesse = params.get("vitesse_moyenne");
+        int tempsAttente = params.get("temps_attente");
+
+        // 4. Grouper les réservations par hôtel (clients inséparables = même
         // destination)
         Map<Integer, List<Reservation>> groupesParHotel = new LinkedHashMap<>();
         for (Reservation r : reservations) {
             groupesParHotel.computeIfAbsent(r.getIdHotel(), k -> new ArrayList<>()).add(r);
         }
 
-        // 3. Trier les groupes par distance depuis l'aéroport (le plus proche en
+        // 5. Trier les groupes par distance depuis l'aéroport (le plus proche en
         // premier)
         List<Map.Entry<Integer, List<Reservation>>> groupesTries = new ArrayList<>(groupesParHotel.entrySet());
         groupesTries.sort((a, b) -> {
-            try {
-                double distA = distanceService.getDistance(ID_AEROPORT, a.getKey());
-                double distB = distanceService.getDistance(ID_AEROPORT, b.getKey());
-                return Double.compare(distA, distB);
-            } catch (SQLException e) {
-                return 0;
-            }
+            double distA = distancesMap.getOrDefault(a.getKey(), 999999.0);
+            double distB = distancesMap.getOrDefault(b.getKey(), 999999.0);
+            return Double.compare(distA, distB);
         });
 
-        // 4. Carte pour suivre la capacité restante de chaque véhicule (Sprint 4)
-        Map<Integer, Integer> capaciteRestante = new HashMap<>();
-        List<Map<String, Object>> vehiculesInfo = getVehiculesAvecCapaciteRestante(date);
-        for (Map<String, Object> vi : vehiculesInfo) {
-            Vehicule v = (Vehicule) vi.get("vehicule");
-            capaciteRestante.put(v.getIdVehicule(), (int) vi.get("placesRestantes"));
-        }
+        // 6. Charger les véhicules disponibles (capacité totale, pas partagée entre
+        // destinations)
+        List<Vehicule> tousVehicules = vehiculeService.getAllVehicules();
 
-        // 5. Pour chaque groupe (par hôtel, trié par distance)
+        // Véhicules déjà utilisés aujourd'hui (par d'anciennes assignations)
+        Set<Integer> vehiculesDejaUtilises = getVehiculesUtilises(date);
+
+        // Ensemble pour tracker les véhicules assignés pendant cette exécution
+        Set<Integer> vehiculesAssignesCetteExecution = new HashSet<>();
+
+        // 7. Pour chaque groupe (par hôtel, trié par distance)
         for (Map.Entry<Integer, List<Reservation>> entry : groupesTries) {
             int idHotel = entry.getKey();
             List<Reservation> groupeReservations = entry.getValue();
 
-            // Calculer le total de passagers pour ce groupe
+            // Calculer le total de passagers pour ce groupe (Sprint 4 : inséparables)
             int totalPassagers = 0;
             for (Reservation r : groupeReservations) {
                 totalPassagers += r.getNbPassager();
             }
 
-            // 6. Trouver le meilleur véhicule selon les règles
-            Vehicule meilleurVehicule = trouverMeilleurVehicule(totalPassagers, capaciteRestante, vehiculesInfo);
+            // 8. Trouver le meilleur véhicule DÉDIÉ à ce groupe
+            Vehicule meilleurVehicule = trouverMeilleurVehicule(totalPassagers,
+                    tousVehicules, vehiculesDejaUtilises, vehiculesAssignesCetteExecution);
 
             if (meilleurVehicule == null) {
                 System.err.println("Aucun véhicule disponible pour " + totalPassagers +
@@ -178,25 +207,27 @@ public class AssignationService {
                 continue;
             }
 
-            // 7. Calculer les heures de départ et d'arrivée
-            double distanceKm = distanceService.getDistance(ID_AEROPORT, idHotel);
-            Map<String, Integer> params = parametreService.getParametres();
+            // Marquer ce véhicule comme utilisé (il ne sera plus disponible pour une autre
+            // destination)
+            vehiculesAssignesCetteExecution.add(meilleurVehicule.getIdVehicule());
 
-            // L'heure de départ du premier client du groupe + temps d'attente
+            // 9. Calculer les heures de départ et d'arrivée
+            double distanceKm = distancesMap.getOrDefault(idHotel, 0.0);
+
+            // L'heure de départ = heure du premier client du groupe + temps d'attente
             LocalDateTime premiereDateHeure = groupeReservations.get(0).getDateHeure();
             for (Reservation r : groupeReservations) {
                 if (r.getDateHeure().isBefore(premiereDateHeure)) {
                     premiereDateHeure = r.getDateHeure();
                 }
             }
-            LocalDateTime heureDepart = premiereDateHeure.plusMinutes(params.get("temps_attente"));
+            LocalDateTime heureDepart = premiereDateHeure.plusMinutes(tempsAttente);
 
-            // Temps de route seulement (sans re-ajouter temps_attente)
-            int vitesse = params.get("vitesse_moyenne");
+            // Temps de route = (distance / vitesse) * 60 minutes
             int tempsRouteMinutes = (int) Math.ceil((distanceKm / vitesse) * 60);
             LocalDateTime heureArrivee = heureDepart.plusMinutes(tempsRouteMinutes);
 
-            // 8. Assigner toutes les réservations du groupe à ce véhicule
+            // 10. Assigner toutes les réservations du groupe à ce véhicule
             for (Reservation r : groupeReservations) {
                 Assignation assignation = enregistrerAssignation(
                         r.getIdReservation(),
@@ -207,32 +238,50 @@ public class AssignationService {
                 assignation.setVehicule(meilleurVehicule);
                 nouvellesAssignations.add(assignation);
             }
-
-            // 9. Mettre à jour la capacité restante (Sprint 4)
-            int reste = capaciteRestante.getOrDefault(meilleurVehicule.getIdVehicule(), 0) - totalPassagers;
-            capaciteRestante.put(meilleurVehicule.getIdVehicule(), reste);
         }
 
         return nouvellesAssignations;
     }
 
     /**
+     * Récupérer les IDs des véhicules déjà utilisés pour une date donnée
+     */
+    private Set<Integer> getVehiculesUtilises(LocalDate date) throws SQLException {
+        Set<Integer> utilises = new HashSet<>();
+        String query = "SELECT DISTINCT id_vehicule FROM assignation WHERE DATE(heure_depart) = ?";
+
+        Connection conn = DatabaseConnection.getConnection();
+        PreparedStatement pstmt = conn.prepareStatement(query);
+        pstmt.setDate(1, java.sql.Date.valueOf(date));
+        ResultSet rs = pstmt.executeQuery();
+        while (rs.next()) {
+            utilises.add(rs.getInt("id_vehicule"));
+        }
+        rs.close();
+        pstmt.close();
+
+        return utilises;
+    }
+
+    /**
      * Trouver le meilleur véhicule selon les règles Sprint 3 :
-     * 1. Capacité restante >= nbPassagers
-     * 2. Capacité la plus proche du nombre de passagers
-     * 3. Priorité Diesel
-     * 4. Si encore égalité : choix aléatoire
+     * 1. Véhicule non encore utilisé pour cette date
+     * 2. Capacité totale >= nbPassagers
+     * 3. Capacité la plus proche du nombre de passagers
+     * 4. Priorité Diesel
+     * 5. Si encore égalité Diesel : choix aléatoire (random)
      */
     private Vehicule trouverMeilleurVehicule(int nbPassagers,
-            Map<Integer, Integer> capaciteRestante,
-            List<Map<String, Object>> vehiculesInfo) {
+            List<Vehicule> tousVehicules,
+            Set<Integer> vehiculesDejaUtilises,
+            Set<Integer> vehiculesAssignesCetteExecution) {
 
-        // Filtrer les véhicules ayant assez de places restantes
+        // Filtrer : non utilisé ET capacité suffisante
         List<Vehicule> candidats = new ArrayList<>();
-        for (Map<String, Object> vi : vehiculesInfo) {
-            Vehicule v = (Vehicule) vi.get("vehicule");
-            int reste = capaciteRestante.getOrDefault(v.getIdVehicule(), 0);
-            if (reste >= nbPassagers) {
+        for (Vehicule v : tousVehicules) {
+            if (!vehiculesDejaUtilises.contains(v.getIdVehicule())
+                    && !vehiculesAssignesCetteExecution.contains(v.getIdVehicule())
+                    && v.getCapacite() >= nbPassagers) {
                 candidats.add(v);
             }
         }
@@ -241,14 +290,11 @@ public class AssignationService {
             return null;
         }
 
-        // Trier par : capacité restante la plus proche, puis diesel, puis random
-        final Map<Integer, Integer> capRef = capaciteRestante;
+        // Trier par : capacité la plus proche, puis diesel, puis random
         candidats.sort((a, b) -> {
-            int resteA = capRef.getOrDefault(a.getIdVehicule(), 0);
-            int resteB = capRef.getOrDefault(b.getIdVehicule(), 0);
             // Plus proche du nombre de passagers = différence la plus petite
-            int diffA = resteA - nbPassagers;
-            int diffB = resteB - nbPassagers;
+            int diffA = a.getCapacite() - nbPassagers;
+            int diffB = b.getCapacite() - nbPassagers;
             if (diffA != diffB)
                 return Integer.compare(diffA, diffB);
             // Priorité diesel
@@ -256,19 +302,19 @@ public class AssignationService {
             boolean dieselB = "diesel".equalsIgnoreCase(b.getCarburant());
             if (dieselA != dieselB)
                 return dieselA ? -1 : 1;
-            // Random si tout est égal
+            // Egalité totale
             return 0;
         });
 
-        // Si les meilleurs candidats ont les mêmes critères (même diff et même
-        // carburant), choisir au hasard
+        // Si les meilleurs candidats sont ex-aequo (même diff et même carburant),
+        // choisir au hasard
         Vehicule premier = candidats.get(0);
-        int premierDiff = capRef.getOrDefault(premier.getIdVehicule(), 0) - nbPassagers;
+        int premierDiff = premier.getCapacite() - nbPassagers;
         boolean premierDiesel = "diesel".equalsIgnoreCase(premier.getCarburant());
 
         List<Vehicule> exAequo = new ArrayList<>();
         for (Vehicule v : candidats) {
-            int diff = capRef.getOrDefault(v.getIdVehicule(), 0) - nbPassagers;
+            int diff = v.getCapacite() - nbPassagers;
             boolean diesel = "diesel".equalsIgnoreCase(v.getCarburant());
             if (diff == premierDiff && diesel == premierDiesel) {
                 exAequo.add(v);
@@ -338,8 +384,10 @@ public class AssignationService {
                     reservation.getNbPassager() + " passagers.");
         }
 
-        // Calculer les heures
-        double distanceKm = distanceService.getDistance(ID_AEROPORT, reservation.getIdHotel());
+        // Calculer les heures (pré-charger les distances pour éviter les problèmes de
+        // connexion)
+        Map<Integer, Double> distancesMap = chargerDistancesDepuisAeroport();
+        double distanceKm = distancesMap.getOrDefault(reservation.getIdHotel(), 0.0);
         Map<String, Integer> params = parametreService.getParametres();
         LocalDateTime heureDepart = reservation.getDateHeure().plusMinutes(params.get("temps_attente"));
         int vitesse = params.get("vitesse_moyenne");
