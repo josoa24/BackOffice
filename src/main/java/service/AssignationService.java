@@ -1,10 +1,20 @@
 package service;
 
-import java.sql.*;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 import entity.Assignation;
 import entity.Hotel;
@@ -14,16 +24,81 @@ import entity.Vehicule;
 public class AssignationService {
 
     private VehiculeService vehiculeService = new VehiculeService();
-    private DistanceService distanceService = new DistanceService();
     private ParametreService parametreService = new ParametreService();
-    private HotelService hotelService = new HotelService();
 
-    // ID de l'aéroport (point de départ de tous les trajets)
+    // ID de l'aeroport (point de depart et retour des trajets)
     private static final int ID_AEROPORT = 1;
 
+    private static class GroupeAttente {
+        private LocalDateTime heureDebutFenetre;
+        private LocalDateTime heureFinFenetre;
+        private LocalDateTime heureDepartGroupe;
+        private List<Reservation> reservations;
+
+        GroupeAttente(LocalDateTime heureDebutFenetre, LocalDateTime heureFinFenetre, List<Reservation> reservations) {
+            this.heureDebutFenetre = heureDebutFenetre;
+            this.heureFinFenetre = heureFinFenetre;
+            this.reservations = reservations;
+        }
+    }
+
+    private static class TrajetVehicule {
+        private LocalDateTime heureDepart;
+        private LocalDateTime heureRetourAeroport;
+
+        TrajetVehicule(LocalDateTime heureDepart, LocalDateTime heureRetourAeroport) {
+            this.heureDepart = heureDepart;
+            this.heureRetourAeroport = heureRetourAeroport;
+        }
+
+        boolean estEnTrajet(LocalDateTime instant) {
+            return (instant.isEqual(heureDepart) || instant.isAfter(heureDepart))
+                    && (instant.isEqual(heureRetourAeroport) || instant.isBefore(heureRetourAeroport));
+        }
+
+        boolean estEffectueAvantOuA(LocalDateTime instant) {
+            return heureDepart.isBefore(instant) || heureDepart.isEqual(instant);
+        }
+    }
+
+    private static class EtatVehicule {
+        private Vehicule vehicule;
+        private List<TrajetVehicule> trajets;
+
+        EtatVehicule(Vehicule vehicule) {
+            this.vehicule = vehicule;
+            this.trajets = new ArrayList<>();
+        }
+
+        boolean estDisponibleA(LocalDateTime heureDepart) {
+            for (TrajetVehicule t : trajets) {
+                // Disponible seulement APRES l'heure de retour (retour + 1 minute gere par le
+                // caller)
+                if (t.estEnTrajet(heureDepart)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        int getNombreTrajetsEffectuesA(LocalDateTime heureDepart) {
+            int count = 0;
+            for (TrajetVehicule t : trajets) {
+                if (t.estEffectueAvantOuA(heureDepart)) {
+                    count++;
+                }
+            }
+            return count;
+        }
+
+        void ajouterTrajet(LocalDateTime heureDepart, LocalDateTime heureRetourAeroport) {
+            trajets.add(new TrajetVehicule(heureDepart, heureRetourAeroport));
+        }
+    }
+
     /**
-     * Récupère les réservations NON ASSIGNÉES pour une date donnée
-     * Avec les informations de l'hôtel
+     * Recupere les reservations NON ASSIGNEES pour une date donnee
+     * Avec les informations de l'hotel
      */
     public List<Reservation> getReservationsNonAssignees(LocalDate date) throws SQLException {
         List<Reservation> reservations = new ArrayList<>();
@@ -64,10 +139,7 @@ public class AssignationService {
     }
 
     /**
-     * Récupère les véhicules avec leur capacité restante pour une date donnée
-     * (Sprint 4)
-     * Un véhicule peut avoir plusieurs réservations tant que la capacité n'est pas
-     * dépassée
+     * Recupere les vehicules avec leur capacite restante pour une date donnee
      */
     public List<Map<String, Object>> getVehiculesAvecCapaciteRestante(LocalDate date) throws SQLException {
         List<Map<String, Object>> result = new ArrayList<>();
@@ -109,8 +181,7 @@ public class AssignationService {
     }
 
     /**
-     * Pré-charger TOUTES les distances depuis l'aéroport en une seule requête
-     * Evite les problèmes de connexion lors des appels multiples
+     * Pre-charge toutes les distances depuis l'aeroport en une seule requete
      */
     private Map<Integer, Double> chargerDistancesDepuisAeroport() throws SQLException {
         Map<Integer, Double> distances = new HashMap<>();
@@ -120,9 +191,11 @@ public class AssignationService {
         PreparedStatement pstmt = conn.prepareStatement(query);
         pstmt.setInt(1, ID_AEROPORT);
         ResultSet rs = pstmt.executeQuery();
+
         while (rs.next()) {
             distances.put(rs.getInt("id_to"), rs.getDouble("distance_km"));
         }
+
         rs.close();
         pstmt.close();
 
@@ -130,176 +203,116 @@ public class AssignationService {
     }
 
     /**
-     * ALGORITHME PRINCIPAL - Sprint 3 + Sprint 4
-     * Assigner automatiquement des véhicules aux réservations d'une date donnée
-     *
-     * Règles :
-     * 1. Trajet vers la destination la plus proche de l'aéroport en premier
-     * 2. Clients inséparables (même hôtel) doivent voyager ensemble
-     * 3. Véhicule dont le nombre de places est le plus proche du nombre de clients
-     * 4. Si plusieurs véhicules : priorité Diesel
-     * 5. Si encore égalité Diesel : choix aléatoire (random)
-     * 6. Sprint 4 : Un véhicule peut avoir plusieurs réservations pour le MÊME
-     * hôtel
+     * Sprint 5 + Sprint 6
+     * Sprint 5: regroupement des reservations par fenetre temporelle (temps
+     * d'attente TA)
+     * Sprint 6: choix du vehicule selon nombre de trajets et disponibilite reelle
      */
     public List<Assignation> assignerVehiculesParDate(LocalDate date) throws SQLException {
         List<Assignation> nouvellesAssignations = new ArrayList<>();
 
-        // 1. Récupérer les réservations non assignées
         List<Reservation> reservations = getReservationsNonAssignees(date);
         if (reservations.isEmpty()) {
             return nouvellesAssignations;
         }
 
-        // 2. Pré-charger TOUTES les distances en une seule requête (évite les problèmes
-        // de connexion)
         Map<Integer, Double> distancesMap = chargerDistancesDepuisAeroport();
-
-        // 3. Charger les paramètres une seule fois
         Map<String, Integer> params = parametreService.getParametres();
         int vitesse = params.get("vitesse_moyenne");
         int tempsAttente = params.get("temps_attente");
 
-        // 4. Grouper les réservations par hôtel (clients inséparables = même
-        // destination)
-        Map<Integer, List<Reservation>> groupesParHotel = new LinkedHashMap<>();
-        for (Reservation r : reservations) {
-            groupesParHotel.computeIfAbsent(r.getIdHotel(), k -> new ArrayList<>()).add(r);
-        }
-
-        // 5. Trier les groupes par distance depuis l'aéroport (le plus proche en
-        // premier)
-        List<Map.Entry<Integer, List<Reservation>>> groupesTries = new ArrayList<>(groupesParHotel.entrySet());
-        groupesTries.sort((a, b) -> {
-            double distA = distancesMap.getOrDefault(a.getKey(), 999999.0);
-            double distB = distancesMap.getOrDefault(b.getKey(), 999999.0);
-            return Double.compare(distA, distB);
-        });
-
-        // 6. Charger les véhicules disponibles (capacité totale, pas partagée entre
-        // destinations)
         List<Vehicule> tousVehicules = vehiculeService.getAllVehicules();
+        Map<Integer, EtatVehicule> etatsVehicules = chargerEtatVehicules(date, tousVehicules);
 
-        // Véhicules déjà utilisés aujourd'hui (par d'anciennes assignations)
-        Set<Integer> vehiculesDejaUtilises = getVehiculesUtilises(date);
+        List<GroupeAttente> groupesAttente = construireGroupesAttente(reservations, tempsAttente);
 
-        // Ensemble pour tracker les véhicules assignés pendant cette exécution
-        Set<Integer> vehiculesAssignesCetteExecution = new HashSet<>();
-
-        // 7. Pour chaque groupe (par hôtel, trié par distance)
-        for (Map.Entry<Integer, List<Reservation>> entry : groupesTries) {
-            int idHotel = entry.getKey();
-            List<Reservation> groupeReservations = entry.getValue();
-
-            // Calculer le total de passagers pour ce groupe
-            int totalPassagers = 0;
-            for (Reservation r : groupeReservations) {
-                totalPassagers += r.getNbPassager();
+        for (GroupeAttente groupeAttente : groupesAttente) {
+            Map<Integer, List<Reservation>> groupesParHotel = new LinkedHashMap<>();
+            for (Reservation r : groupeAttente.reservations) {
+                groupesParHotel.computeIfAbsent(r.getIdHotel(), k -> new ArrayList<>()).add(r);
             }
 
-            // 9. Calculer les heures de départ et d'arrivée (commun à tous les véhicules du
-            // groupe)
-            double distanceKm = distancesMap.getOrDefault(idHotel, 0.0);
-            LocalDateTime premiereDateHeure = groupeReservations.get(0).getDateHeure();
-            for (Reservation r : groupeReservations) {
-                if (r.getDateHeure().isBefore(premiereDateHeure)) {
-                    premiereDateHeure = r.getDateHeure();
-                }
-            }
-            LocalDateTime heureDepart = premiereDateHeure.plusMinutes(tempsAttente);
-            int tempsRouteMinutes = (int) Math.ceil((distanceKm / vitesse) * 60);
-            LocalDateTime heureArrivee = heureDepart.plusMinutes(tempsRouteMinutes);
+            // Conserver l'ordre par proximite aeroport pour rester coherent avec Sprint 3
+            List<Map.Entry<Integer, List<Reservation>>> groupesTries = new ArrayList<>(groupesParHotel.entrySet());
+            groupesTries.sort((a, b) -> Double.compare(
+                    distancesMap.getOrDefault(a.getKey(), 999999.0),
+                    distancesMap.getOrDefault(b.getKey(), 999999.0)));
 
-            // 8. Trouver le meilleur véhicule pour TOUT le groupe d'abord
-            Vehicule meilleurVehicule = trouverMeilleurVehicule(totalPassagers,
-                    tousVehicules, vehiculesDejaUtilises, vehiculesAssignesCetteExecution);
+            for (Map.Entry<Integer, List<Reservation>> entry : groupesTries) {
+                int idHotel = entry.getKey();
+                List<Reservation> groupeReservations = entry.getValue();
 
-            if (meilleurVehicule != null) {
-                // CAS SIMPLE : un seul véhicule suffit pour tout le groupe
-                vehiculesAssignesCetteExecution.add(meilleurVehicule.getIdVehicule());
+                double distanceAllerKm = distancesMap.getOrDefault(idHotel, 0.0);
+                int tempsRouteAllerMinutes = (int) Math.ceil((distanceAllerKm / vitesse) * 60);
+                LocalDateTime heureDepart = groupeAttente.heureDepartGroupe;
+                LocalDateTime heureRetourAeroport = heureDepart.plusMinutes(tempsRouteAllerMinutes * 2L);
 
-                for (Reservation r : groupeReservations) {
-                    Assignation assignation = enregistrerAssignation(
-                            r.getIdReservation(),
-                            meilleurVehicule.getIdVehicule(),
-                            heureDepart,
-                            heureArrivee);
-                    assignation.setReservation(r);
-                    assignation.setVehicule(meilleurVehicule);
-                    nouvellesAssignations.add(assignation);
-                }
-            } else {
-                // CAS SPRINT 4 : aucun véhicule ne peut prendre tout le groupe
-                // Répartir les réservations sur plusieurs véhicules
-                // Trier les réservations par nbPassager décroissant (gros d'abord)
                 List<Reservation> restantes = new ArrayList<>(groupeReservations);
                 restantes.sort((a, b) -> Integer.compare(b.getNbPassager(), a.getNbPassager()));
 
                 while (!restantes.isEmpty()) {
-                    // Calculer le total des restants
                     int totalRestant = 0;
                     for (Reservation r : restantes) {
                         totalRestant += r.getNbPassager();
                     }
 
-                    // D'abord essayer de trouver un véhicule qui prend TOUS les restants
-                    Vehicule vehicule = trouverMeilleurVehicule(totalRestant,
-                            tousVehicules, vehiculesDejaUtilises, vehiculesAssignesCetteExecution);
+                    EtatVehicule etat = choisirVehiculePourCapacite(
+                            totalRestant,
+                            heureDepart,
+                            etatsVehicules,
+                            true);
 
-                    if (vehicule != null) {
-                        // Tous les restants tiennent dans un seul véhicule
-                        vehiculesAssignesCetteExecution.add(vehicule.getIdVehicule());
-                        for (Reservation r : restantes) {
-                            Assignation assignation = enregistrerAssignation(
-                                    r.getIdReservation(),
-                                    vehicule.getIdVehicule(),
-                                    heureDepart,
-                                    heureArrivee);
-                            assignation.setReservation(r);
-                            assignation.setVehicule(vehicule);
-                            nouvellesAssignations.add(assignation);
-                        }
+                    if (etat != null) {
+                        enregistrerBatchAssignations(
+                                restantes,
+                                etat,
+                                heureDepart,
+                                heureRetourAeroport,
+                                nouvellesAssignations);
                         restantes.clear();
-                    } else {
-                        // Sinon, prendre le plus grand véhicule et le remplir au max
-                        vehicule = trouverPlusGrandVehiculeDisponible(
-                                tousVehicules, vehiculesDejaUtilises, vehiculesAssignesCetteExecution);
+                        continue;
+                    }
 
-                        if (vehicule == null) {
-                            System.err.println("Plus aucun véhicule disponible pour " + totalRestant +
-                                    " passagers restants vers l'hôtel " + idHotel);
-                            break;
-                        }
+                    etat = choisirVehiculePourCapacite(
+                            1,
+                            heureDepart,
+                            etatsVehicules,
+                            false);
 
-                        vehiculesAssignesCetteExecution.add(vehicule.getIdVehicule());
-                        int capaciteVehicule = vehicule.getCapacite();
+                    if (etat == null) {
+                        System.err.println("Aucun vehicule disponible pour le groupe hotel " + idHotel +
+                                " a " + heureDepart + ". Reservations restantes: " + restantes.size());
+                        break;
+                    }
 
-                        // Remplir ce véhicule avec autant de réservations que possible
-                        List<Reservation> assigneesACeVehicule = new ArrayList<>();
-                        int passagersDansVehicule = 0;
+                    int capaciteVehicule = etat.vehicule.getCapacite();
+                    List<Reservation> assigneesACeVehicule = new ArrayList<>();
+                    int passagersDansVehicule = 0;
 
-                        Iterator<Reservation> it = restantes.iterator();
-                        while (it.hasNext()) {
-                            Reservation r = it.next();
-                            if (passagersDansVehicule + r.getNbPassager() <= capaciteVehicule) {
-                                assigneesACeVehicule.add(r);
-                                passagersDansVehicule += r.getNbPassager();
-                                it.remove();
-                            }
-                        }
-
-                        // Enregistrer les assignations pour ce véhicule
-                        for (Reservation r : assigneesACeVehicule) {
-                            Assignation assignation = enregistrerAssignation(
-                                    r.getIdReservation(),
-                                    vehicule.getIdVehicule(),
-                                    heureDepart,
-                                    heureArrivee);
-                            assignation.setReservation(r);
-                            assignation.setVehicule(vehicule);
-                            nouvellesAssignations.add(assignation);
+                    Iterator<Reservation> it = restantes.iterator();
+                    while (it.hasNext()) {
+                        Reservation r = it.next();
+                        if (passagersDansVehicule + r.getNbPassager() <= capaciteVehicule) {
+                            assigneesACeVehicule.add(r);
+                            passagersDansVehicule += r.getNbPassager();
+                            it.remove();
                         }
                     }
+
+                    // Evite une boucle infinie si une reservation depasse toutes les capacites
+                    if (assigneesACeVehicule.isEmpty()) {
+                        Reservation nonAssignable = restantes.remove(0);
+                        System.err.println("Reservation non assignable (capacite insuffisante): id="
+                                + nonAssignable.getIdReservation() + ", passagers=" + nonAssignable.getNbPassager());
+                        continue;
+                    }
+
+                    enregistrerBatchAssignations(
+                            assigneesACeVehicule,
+                            etat,
+                            heureDepart,
+                            heureRetourAeroport,
+                            nouvellesAssignations);
                 }
             }
         }
@@ -307,129 +320,159 @@ public class AssignationService {
         return nouvellesAssignations;
     }
 
-    /**
-     * Récupérer les IDs des véhicules déjà utilisés pour une date donnée
-     */
-    private Set<Integer> getVehiculesUtilises(LocalDate date) throws SQLException {
-        Set<Integer> utilises = new HashSet<>();
-        String query = "SELECT DISTINCT id_vehicule FROM assignation WHERE DATE(heure_depart) = ?";
-
-        Connection conn = DatabaseConnection.getConnection();
-        PreparedStatement pstmt = conn.prepareStatement(query);
-        pstmt.setDate(1, java.sql.Date.valueOf(date));
-        ResultSet rs = pstmt.executeQuery();
-        while (rs.next()) {
-            utilises.add(rs.getInt("id_vehicule"));
-        }
-        rs.close();
-        pstmt.close();
-
-        return utilises;
-    }
-
-    /**
-     * Trouver le meilleur véhicule selon les règles Sprint 3 :
-     * 1. Véhicule non encore utilisé pour cette date
-     * 2. Capacité totale >= nbPassagers
-     * 3. Capacité la plus proche du nombre de passagers
-     * 4. Priorité Diesel
-     * 5. Si encore égalité Diesel : choix aléatoire (random)
-     */
-    private Vehicule trouverMeilleurVehicule(int nbPassagers,
-            List<Vehicule> tousVehicules,
-            Set<Integer> vehiculesDejaUtilises,
-            Set<Integer> vehiculesAssignesCetteExecution) {
-
-        // Filtrer : non utilisé ET capacité suffisante
-        List<Vehicule> candidats = new ArrayList<>();
-        for (Vehicule v : tousVehicules) {
-            if (!vehiculesDejaUtilises.contains(v.getIdVehicule())
-                    && !vehiculesAssignesCetteExecution.contains(v.getIdVehicule())
-                    && v.getCapacite() >= nbPassagers) {
-                candidats.add(v);
-            }
+    private List<GroupeAttente> construireGroupesAttente(List<Reservation> reservations, int tempsAttenteMinutes) {
+        List<GroupeAttente> groupes = new ArrayList<>();
+        if (reservations.isEmpty()) {
+            return groupes;
         }
 
-        if (candidats.isEmpty()) {
-            return null;
-        }
+        reservations.sort(Comparator.comparing(Reservation::getDateHeure));
 
-        // Trier par : capacité la plus proche, puis diesel, puis random
-        candidats.sort((a, b) -> {
-            // Plus proche du nombre de passagers = différence la plus petite
-            int diffA = a.getCapacite() - nbPassagers;
-            int diffB = b.getCapacite() - nbPassagers;
-            if (diffA != diffB)
-                return Integer.compare(diffA, diffB);
-            // Priorité diesel
-            boolean dieselA = "diesel".equalsIgnoreCase(a.getCarburant());
-            boolean dieselB = "diesel".equalsIgnoreCase(b.getCarburant());
-            if (dieselA != dieselB)
-                return dieselA ? -1 : 1;
-            // Egalité totale
-            return 0;
-        });
+        List<Reservation> courant = new ArrayList<>();
+        LocalDateTime debutFenetre = reservations.get(0).getDateHeure();
+        LocalDateTime finFenetre = debutFenetre.plusMinutes(tempsAttenteMinutes);
+        courant.add(reservations.get(0));
 
-        // Si les meilleurs candidats sont ex-aequo (même diff et même carburant),
-        // choisir au hasard
-        Vehicule premier = candidats.get(0);
-        int premierDiff = premier.getCapacite() - nbPassagers;
-        boolean premierDiesel = "diesel".equalsIgnoreCase(premier.getCarburant());
+        for (int i = 1; i < reservations.size(); i++) {
+            Reservation r = reservations.get(i);
+            LocalDateTime heureVol = r.getDateHeure();
 
-        List<Vehicule> exAequo = new ArrayList<>();
-        for (Vehicule v : candidats) {
-            int diff = v.getCapacite() - nbPassagers;
-            boolean diesel = "diesel".equalsIgnoreCase(v.getCarburant());
-            if (diff == premierDiff && diesel == premierDiesel) {
-                exAequo.add(v);
+            if (heureVol.isBefore(finFenetre) || heureVol.isEqual(finFenetre)) {
+                courant.add(r);
             } else {
-                break;
+                groupes.add(creerGroupeAttente(debutFenetre, finFenetre, courant));
+
+                courant = new ArrayList<>();
+                debutFenetre = heureVol;
+                finFenetre = debutFenetre.plusMinutes(tempsAttenteMinutes);
+                courant.add(r);
             }
         }
 
-        // Choix aléatoire parmi les ex-aequo
-        if (exAequo.size() > 1) {
-            Random random = new Random();
-            return exAequo.get(random.nextInt(exAequo.size()));
+        groupes.add(creerGroupeAttente(debutFenetre, finFenetre, courant));
+        return groupes;
+    }
+
+    private GroupeAttente creerGroupeAttente(LocalDateTime debutFenetre, LocalDateTime finFenetre,
+            List<Reservation> reservations) {
+        List<Reservation> copie = new ArrayList<>(reservations);
+        LocalDateTime departGroupe = copie.get(0).getDateHeure();
+
+        for (Reservation r : copie) {
+            if (r.getDateHeure().isAfter(departGroupe)) {
+                departGroupe = r.getDateHeure();
+            }
         }
 
-        return premier;
+        GroupeAttente g = new GroupeAttente(debutFenetre, finFenetre, copie);
+        g.heureDepartGroupe = departGroupe;
+        return g;
+    }
+
+    private Map<Integer, EtatVehicule> chargerEtatVehicules(LocalDate date, List<Vehicule> tousVehicules)
+            throws SQLException {
+        Map<Integer, EtatVehicule> etats = new HashMap<>();
+        for (Vehicule v : tousVehicules) {
+            etats.put(v.getIdVehicule(), new EtatVehicule(v));
+        }
+
+        String query = "SELECT id_vehicule, heure_depart, heure_arrivee " +
+                "FROM assignation " +
+                "WHERE DATE(heure_depart) = ? " +
+                "GROUP BY id_vehicule, heure_depart, heure_arrivee";
+
+        try (Connection conn = DatabaseConnection.getConnection();
+                PreparedStatement pstmt = conn.prepareStatement(query)) {
+            pstmt.setDate(1, java.sql.Date.valueOf(date));
+
+            try (ResultSet rs = pstmt.executeQuery()) {
+                while (rs.next()) {
+                    int idVehicule = rs.getInt("id_vehicule");
+                    EtatVehicule etat = etats.get(idVehicule);
+                    if (etat != null) {
+                        LocalDateTime heureDepart = rs.getTimestamp("heure_depart").toLocalDateTime();
+                        LocalDateTime heureRetourAeroport = rs.getTimestamp("heure_arrivee").toLocalDateTime();
+                        etat.ajouterTrajet(heureDepart, heureRetourAeroport);
+                    }
+                }
+            }
+        }
+
+        return etats;
     }
 
     /**
-     * Sprint 4 : Trouver le plus grand véhicule disponible
-     * Utilisé quand aucun véhicule ne peut prendre tout le groupe
-     * Règles : plus grande capacité, priorité diesel, random si égalité
+     * Si capaciteExacte=true, capacite >= nbPassagers.
+     * Sinon, on cherche juste le plus grand vehicule disponible (utile pour remplir
+     * en plusieurs voyages).
      */
-    private Vehicule trouverPlusGrandVehiculeDisponible(
-            List<Vehicule> tousVehicules,
-            Set<Integer> vehiculesDejaUtilises,
-            Set<Integer> vehiculesAssignesCetteExecution) {
+    private EtatVehicule choisirVehiculePourCapacite(
+            int nbPassagers,
+            LocalDateTime heureDepart,
+            Map<Integer, EtatVehicule> etatsVehicules,
+            boolean capaciteExacte) {
 
-        List<Vehicule> candidats = new ArrayList<>();
-        for (Vehicule v : tousVehicules) {
-            if (!vehiculesDejaUtilises.contains(v.getIdVehicule())
-                    && !vehiculesAssignesCetteExecution.contains(v.getIdVehicule())) {
-                candidats.add(v);
+        List<EtatVehicule> candidats = new ArrayList<>();
+        for (EtatVehicule etat : etatsVehicules.values()) {
+            if (!etat.estDisponibleA(heureDepart)) {
+                continue;
             }
+            if (capaciteExacte && etat.vehicule.getCapacite() < nbPassagers) {
+                continue;
+            }
+            candidats.add(etat);
         }
 
         if (candidats.isEmpty()) {
             return null;
         }
 
-        // Trier par capacité décroissante, puis diesel, puis random
+        // Sprint 6:
+        // 1) moins de trajets effectues
+        // 2) si egalite: diesel prioritaire
+        // 3) puis capacite la plus grande
         candidats.sort((a, b) -> {
-            if (a.getCapacite() != b.getCapacite())
-                return Integer.compare(b.getCapacite(), a.getCapacite());
-            boolean dieselA = "diesel".equalsIgnoreCase(a.getCarburant());
-            boolean dieselB = "diesel".equalsIgnoreCase(b.getCarburant());
-            if (dieselA != dieselB)
+            int trajetsA = a.getNombreTrajetsEffectuesA(heureDepart);
+            int trajetsB = b.getNombreTrajetsEffectuesA(heureDepart);
+            if (trajetsA != trajetsB) {
+                return Integer.compare(trajetsA, trajetsB);
+            }
+
+            boolean dieselA = "diesel".equalsIgnoreCase(a.vehicule.getCarburant());
+            boolean dieselB = "diesel".equalsIgnoreCase(b.vehicule.getCarburant());
+            if (dieselA != dieselB) {
                 return dieselA ? -1 : 1;
-            return 0;
+            }
+
+            if (a.vehicule.getCapacite() != b.vehicule.getCapacite()) {
+                return Integer.compare(b.vehicule.getCapacite(), a.vehicule.getCapacite());
+            }
+
+            return Integer.compare(a.vehicule.getIdVehicule(), b.vehicule.getIdVehicule());
         });
 
         return candidats.get(0);
+    }
+
+    private void enregistrerBatchAssignations(
+            List<Reservation> reservations,
+            EtatVehicule etatVehicule,
+            LocalDateTime heureDepart,
+            LocalDateTime heureRetourAeroport,
+            List<Assignation> nouvellesAssignations) throws SQLException {
+
+        etatVehicule.ajouterTrajet(heureDepart, heureRetourAeroport);
+
+        for (Reservation r : reservations) {
+            Assignation assignation = enregistrerAssignation(
+                    r.getIdReservation(),
+                    etatVehicule.vehicule.getIdVehicule(),
+                    heureDepart,
+                    heureRetourAeroport);
+            assignation.setReservation(r);
+            assignation.setVehicule(etatVehicule.vehicule);
+            nouvellesAssignations.add(assignation);
+        }
     }
 
     /**
@@ -464,41 +507,46 @@ public class AssignationService {
     }
 
     /**
-     * Assigner manuellement une réservation à un véhicule
-     * Vérifie que la capacité n'est pas dépassée (Sprint 4)
+     * Assignation manuelle d'une reservation a un vehicule
+     * Verifie capacite et disponibilite du vehicule
      */
     public void assignerReservationManuelle(int idReservation, int idVehicule, LocalDate date)
             throws SQLException {
-        // Récupérer la réservation
         ReservationService reservationService = new ReservationService();
         Reservation reservation = reservationService.getReservationById(idReservation);
         if (reservation == null) {
-            throw new SQLException("Réservation introuvable: " + idReservation);
+            throw new SQLException("Reservation introuvable: " + idReservation);
         }
 
-        // Vérifier la capacité restante du véhicule (Sprint 4)
         int capaciteRestante = getCapaciteRestante(idVehicule, date);
         if (capaciteRestante < reservation.getNbPassager()) {
-            throw new SQLException("Capacité insuffisante! Le véhicule n'a que " +
+            throw new SQLException("Capacite insuffisante! Le vehicule n'a que " +
                     capaciteRestante + " places restantes pour " +
                     reservation.getNbPassager() + " passagers.");
         }
 
-        // Calculer les heures (pré-charger les distances pour éviter les problèmes de
-        // connexion)
         Map<Integer, Double> distancesMap = chargerDistancesDepuisAeroport();
         double distanceKm = distancesMap.getOrDefault(reservation.getIdHotel(), 0.0);
         Map<String, Integer> params = parametreService.getParametres();
-        LocalDateTime heureDepart = reservation.getDateHeure().plusMinutes(params.get("temps_attente"));
         int vitesse = params.get("vitesse_moyenne");
-        int tempsRouteMinutes = (int) Math.ceil((distanceKm / vitesse) * 60);
-        LocalDateTime heureArrivee = heureDepart.plusMinutes(tempsRouteMinutes);
 
-        enregistrerAssignation(idReservation, idVehicule, heureDepart, heureArrivee);
+        int tempsRouteAllerMinutes = (int) Math.ceil((distanceKm / vitesse) * 60);
+        LocalDateTime heureDepart = reservation.getDateHeure();
+        LocalDateTime heureRetourAeroport = heureDepart.plusMinutes(tempsRouteAllerMinutes * 2L);
+
+        List<Vehicule> tousVehicules = vehiculeService.getAllVehicules();
+        Map<Integer, EtatVehicule> etatsVehicules = chargerEtatVehicules(date, tousVehicules);
+        EtatVehicule etat = etatsVehicules.get(idVehicule);
+
+        if (etat != null && !etat.estDisponibleA(heureDepart)) {
+            throw new SQLException("Le vehicule est deja en trajet a l'heure demandee.");
+        }
+
+        enregistrerAssignation(idReservation, idVehicule, heureDepart, heureRetourAeroport);
     }
 
     /**
-     * Récupère la capacité restante d'un véhicule pour une date
+     * Recupere la capacite restante d'un vehicule pour une date
      */
     public int getCapaciteRestante(int idVehicule, LocalDate date) throws SQLException {
         String query = "SELECT v.capacite - COALESCE(SUM(r.nbPassager), 0) as places_restantes " +
@@ -523,50 +571,75 @@ public class AssignationService {
     }
 
     /**
-     * Récupère les trajets planifiés pour une date donnée
-     * Regroupe les réservations par véhicule (Sprint 4)
+     * Recupere les trajets planifies pour une date donnee
+     * Sprint 6: un trajet contient depart aeroport, vehicule, reservations,
+     * kilometrage, retour aeroport
      */
     public List<Map<String, Object>> getTrajets(LocalDate date) throws SQLException {
         List<Map<String, Object>> trajets = new ArrayList<>();
         String query = "SELECT a.id_vehicule, v.marque, v.modele, v.immatriculation, v.capacite, v.carburant, " +
-                "MIN(a.heure_depart) as heure_depart, MAX(a.heure_arrivee) as heure_arrivee, " +
+                "a.heure_depart as heure_depart, a.heure_arrivee as heure_retour_aeroport, " +
                 "COUNT(a.id_reservation) as nb_reservations, " +
-                "SUM(r.nbPassager) as total_passagers " +
+                "SUM(r.nbPassager) as total_passagers, " +
+                "COALESCE(MAX(d.distance_km), 0) as distance_aller_km " +
                 "FROM assignation a " +
                 "JOIN vehicule v ON a.id_vehicule = v.id_vehicule " +
                 "JOIN reservation r ON a.id_reservation = r.id_reservation " +
+                "LEFT JOIN distance d ON d.id_from = ? AND d.id_to = r.id_hotel " +
                 "WHERE DATE(a.heure_depart) = ? " +
-                "GROUP BY a.id_vehicule, v.marque, v.modele, v.immatriculation, v.capacite, v.carburant " +
-                "ORDER BY MIN(a.heure_depart) ASC";
+                "GROUP BY a.id_vehicule, v.marque, v.modele, v.immatriculation, v.capacite, v.carburant, a.heure_depart, a.heure_arrivee "
+                +
+                "ORDER BY a.heure_depart ASC, a.id_vehicule ASC";
+
+        Map<Integer, Integer> compteurTrajetsParVehicule = new HashMap<>();
 
         try (Connection conn = DatabaseConnection.getConnection();
                 PreparedStatement pstmt = conn.prepareStatement(query)) {
 
-            pstmt.setDate(1, java.sql.Date.valueOf(date));
+            pstmt.setInt(1, ID_AEROPORT);
+            pstmt.setDate(2, java.sql.Date.valueOf(date));
 
             try (ResultSet rs = pstmt.executeQuery()) {
                 while (rs.next()) {
                     Map<String, Object> trajet = new HashMap<>();
-                    trajet.put("idVehicule", rs.getInt("id_vehicule"));
+
+                    int idVehicule = rs.getInt("id_vehicule");
+                    int nbTrajets = compteurTrajetsParVehicule.getOrDefault(idVehicule, 0) + 1;
+                    compteurTrajetsParVehicule.put(idVehicule, nbTrajets);
+
+                    int capacite = rs.getInt("capacite");
+                    int totalPassagers = rs.getInt("total_passagers");
+                    int placesRestantes = capacite - totalPassagers;
+                    double distanceAller = rs.getDouble("distance_aller_km");
+                    double kilometrageParcouru = distanceAller * 2.0;
+
+                    LocalDateTime heureDepart = rs.getTimestamp("heure_depart").toLocalDateTime();
+                    LocalDateTime heureRetourAeroport = rs.getTimestamp("heure_retour_aeroport").toLocalDateTime();
+
+                    trajet.put("idVehicule", idVehicule);
                     trajet.put("vehicule", rs.getString("marque") + " " + rs.getString("modele"));
                     trajet.put("immatriculation", rs.getString("immatriculation"));
-                    trajet.put("capacite", rs.getInt("capacite"));
+                    trajet.put("capacite", capacite);
                     trajet.put("carburant", rs.getString("carburant"));
-                    trajet.put("heureDepart", rs.getTimestamp("heure_depart").toLocalDateTime());
-                    trajet.put("heureArrivee", rs.getTimestamp("heure_arrivee").toLocalDateTime());
+                    trajet.put("heureDepart", heureDepart);
+                    trajet.put("heureArrivee", heureRetourAeroport); // compatibilite ancien affichage
+                    trajet.put("heureRetourAeroport", heureRetourAeroport);
                     trajet.put("nbReservations", rs.getInt("nb_reservations"));
-                    trajet.put("totalPassagers", rs.getInt("total_passagers"));
-                    int placesRestantes = rs.getInt("capacite") - rs.getInt("total_passagers");
+                    trajet.put("totalPassagers", totalPassagers);
                     trajet.put("placesRestantes", placesRestantes);
+                    trajet.put("kilometrageParcouru", kilometrageParcouru);
+                    trajet.put("nbTrajetsVehicule", nbTrajets);
+
                     trajets.add(trajet);
                 }
             }
         }
+
         return trajets;
     }
 
     /**
-     * Récupérer toutes les assignations pour une date avec détails complets
+     * Recuperer toutes les assignations pour une date avec details complets
      */
     public List<Assignation> getAssignationsByDate(LocalDate date) throws SQLException {
         List<Assignation> assignations = new ArrayList<>();

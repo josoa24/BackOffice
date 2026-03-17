@@ -17,7 +17,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Planification Vehicules - Sprint 3-4</title>
+    <title>Planification Vehicules - Sprint 5-6</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
@@ -93,7 +93,7 @@
             <!-- Header -->
             <div class="header-section">
                 <h1><i class="fas fa-route"></i> Planification des Vehicules</h1>
-                <p>Sprint 3-4 : Assignation automatique avec regles de gestion</p>
+                <p>Sprint 5-6 : Regroupement par temps d'attente + priorite par nombre de trajets</p>
             </div>
 
             <!-- Etape 1 : Selection de la date -->
@@ -179,7 +179,7 @@
                                 <div>
                                     <h6 class="mb-1 fw-bold" style="color: #166534;"><i class="fas fa-magic me-2"></i> Planification Automatique</h6>
                                     <small style="color: #15803d;">
-                                        Applique les regles : destination la plus proche, clients inseparables, meilleur vehicule (capacite + diesel + random)
+                                        Applique les regles Sprint 5-6 : fenetre de temps d'attente, disponibilite vehicule, compteur de trajets, priorite diesel en cas d'egalite
                                     </small>
                                 </div>
                                 <form method="post" action="${pageContext.request.contextPath}/assignation-planifier">
@@ -234,11 +234,11 @@
                 </div>
                 <% } %>
 
-                <!-- Etape 3 : Trajets planifies (Sprint 4 - Regroupement) -->
+                <!-- Etape 3 : Trajets planifies (Sprint 6) -->
                 <% if (trajets != null && !trajets.isEmpty()) { %>
                 <div class="card">
                     <div class="card-header">
-                        <span><i class="fas fa-route me-2" style="color:#059669"></i> Trajets Planifies (Sprint 4 - Vehicules multi-reservations)</span>
+                        <span><i class="fas fa-route me-2" style="color:#059669"></i> Trajets Planifies (Sprint 6)</span>
                         <span class="badge-places"><%= trajets.size() %> trajet(s)</span>
                     </div>
                     <div class="card-body">
@@ -260,11 +260,13 @@
                                 </span>
                             </div>
                             <div class="trajet-detail">
-                                <span><i class="fas fa-clock" style="color:#059669"></i> Depart: <strong><%= ((java.time.LocalDateTime)t.get("heureDepart")).format(timeFormatter) %></strong></span>
-                                <span><i class="fas fa-flag-checkered" style="color:#d97706"></i> Arrivee: <strong><%= ((java.time.LocalDateTime)t.get("heureArrivee")).format(timeFormatter) %></strong></span>
+                                <span><i class="fas fa-clock" style="color:#059669"></i> Depart aeroport: <strong><%= ((java.time.LocalDateTime)t.get("heureDepart")).format(timeFormatter) %></strong></span>
+                                <span><i class="fas fa-plane-arrival" style="color:#d97706"></i> Retour aeroport: <strong><%= ((java.time.LocalDateTime)t.get("heureRetourAeroport")).format(timeFormatter) %></strong></span>
                                 <span><i class="fas fa-ticket-alt" style="color:#667eea"></i> <%= t.get("nbReservations") %> reservation(s)</span>
                                 <span><i class="fas fa-users" style="color:#e65100"></i> <%= totalP %>/<%= capacite %> passagers</span>
                                 <span><i class="fas fa-chair" style="color:#059669"></i> <%= placesRestantes %> places restantes</span>
+                                <span><i class="fas fa-road" style="color:#7c3aed"></i> <%= String.format("%.1f", (Double)t.get("kilometrageParcouru")) %> km</span>
+                                <span><i class="fas fa-repeat" style="color:#2563eb"></i> Trajet #<%= t.get("nbTrajetsVehicule") %></span>
                             </div>
                             <div class="mt-2">
                                 <div class="progress" style="height:8px; border-radius:4px;">
