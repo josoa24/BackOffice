@@ -316,7 +316,10 @@
                                     <tr>
                                         <td><span class="badge-id">#<%= a.getIdAssignation() %></span></td>
                                         <td><strong><%= a.getReservation().getIdClient() %></strong></td>
-                                        <td><span class="badge-passagers"><%= a.getReservation().getNbPassager() %></span></td>
+                                        <td>
+                                            <span class="badge-passagers"><%= a.getNbPassagersAssignes() %> assignes</span>
+                                            <br><small style="color:#9ba4b5">/ <%= a.getReservation().getNbPassager() %> total reservation</small>
+                                        </td>
                                         <td>
                                             <span class="badge-hotel">
                                                 <i class="fas fa-map-marker-alt"></i>
