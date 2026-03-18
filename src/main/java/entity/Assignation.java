@@ -8,6 +8,8 @@ public class Assignation {
     private int idVehicule;
     private LocalDateTime heureDepart;
     private LocalDateTime heureArrivee;
+    private double kilometrage;
+    private int idHotel;
     private Reservation reservation;
     private Vehicule vehicule;
 
@@ -68,5 +70,21 @@ public class Assignation {
 
     public void setVehicule(Vehicule vehicule) {
         this.vehicule = vehicule;
+    }
+
+    public double getKilometrage() {
+        return kilometrage;
+    }
+
+    public void setKilometrage(double kilometrage) {
+        this.kilometrage = kilometrage;
+    }
+
+    public int getIdHotel() {
+        return idHotel;
+    }
+
+    public void setIdHotel(int idHotel) {
+        this.idHotel = idHotel;
     }
 }

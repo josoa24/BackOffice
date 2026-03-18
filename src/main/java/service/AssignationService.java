@@ -263,11 +263,14 @@ public class AssignationService {
                             true);
 
                     if (etat != null) {
+                        double kilometrage = distanceAllerKm * 2.0;
                         enregistrerBatchAssignations(
                                 restantes,
                                 etat,
                                 heureDepart,
                                 heureRetourAeroport,
+                                kilometrage,
+                                idHotel,
                                 nouvellesAssignations);
                         restantes.clear();
                         continue;
@@ -307,11 +310,14 @@ public class AssignationService {
                         continue;
                     }
 
+                    double kilometrage = distanceAllerKm * 2.0;
                     enregistrerBatchAssignations(
                             assigneesACeVehicule,
                             etat,
                             heureDepart,
                             heureRetourAeroport,
+                            kilometrage,
+                            idHotel,
                             nouvellesAssignations);
                 }
             }
@@ -459,6 +465,8 @@ public class AssignationService {
             EtatVehicule etatVehicule,
             LocalDateTime heureDepart,
             LocalDateTime heureRetourAeroport,
+            double kilometrage,
+            int idHotel,
             List<Assignation> nouvellesAssignations) throws SQLException {
 
         etatVehicule.ajouterTrajet(heureDepart, heureRetourAeroport);
@@ -468,7 +476,9 @@ public class AssignationService {
                     r.getIdReservation(),
                     etatVehicule.vehicule.getIdVehicule(),
                     heureDepart,
-                    heureRetourAeroport);
+                    heureRetourAeroport,
+                    kilometrage,
+                    idHotel);
             assignation.setReservation(r);
             assignation.setVehicule(etatVehicule.vehicule);
             nouvellesAssignations.add(assignation);
@@ -476,11 +486,12 @@ public class AssignationService {
     }
 
     /**
-     * Enregistrer une assignation en base
+     * Enregistrer une assignation en base avec kilométrage et hôtel
      */
     public Assignation enregistrerAssignation(int idReservation, int idVehicule,
-            LocalDateTime heureDepart, LocalDateTime heureArrivee) throws SQLException {
-        String query = "INSERT INTO assignation (id_reservation, id_vehicule, heure_depart, heure_arrivee) VALUES (?, ?, ?, ?)";
+            LocalDateTime heureDepart, LocalDateTime heureArrivee, double kilometrage, int idHotel)
+            throws SQLException {
+        String query = "INSERT INTO assignation (id_reservation, id_vehicule, heure_depart, heure_arrivee, kilometrage, id_hotel) VALUES (?, ?, ?, ?, ?, ?)";
 
         try (Connection conn = DatabaseConnection.getConnection();
                 PreparedStatement pstmt = conn.prepareStatement(query, Statement.RETURN_GENERATED_KEYS)) {
@@ -489,6 +500,8 @@ public class AssignationService {
             pstmt.setInt(2, idVehicule);
             pstmt.setTimestamp(3, Timestamp.valueOf(heureDepart));
             pstmt.setTimestamp(4, Timestamp.valueOf(heureArrivee));
+            pstmt.setDouble(5, kilometrage);
+            pstmt.setInt(6, idHotel);
 
             pstmt.executeUpdate();
 
@@ -501,6 +514,8 @@ public class AssignationService {
                 assignation.setIdVehicule(idVehicule);
                 assignation.setHeureDepart(heureDepart);
                 assignation.setHeureArrivee(heureArrivee);
+                assignation.setKilometrage(kilometrage);
+                assignation.setIdHotel(idHotel);
                 return assignation;
             }
         }
@@ -542,7 +557,9 @@ public class AssignationService {
             throw new SQLException("Le vehicule est deja en trajet a l'heure demandee.");
         }
 
-        enregistrerAssignation(idReservation, idVehicule, heureDepart, heureRetourAeroport);
+        double kilometrage = distanceKm * 2.0;
+        int idHotel = reservation.getIdHotel();
+        enregistrerAssignation(idReservation, idVehicule, heureDepart, heureRetourAeroport, kilometrage, idHotel);
     }
 
     /**
@@ -572,63 +589,64 @@ public class AssignationService {
 
     /**
      * Recupere les trajets planifies pour une date donnee
-     * Sprint 6: un trajet contient depart aeroport, vehicule, reservations,
-     * kilometrage, retour aeroport
+     * Vue metier Sprint 5/6:
+     * - un trajet = un groupe de depart (meme heure de depart aeroport)
+     * - contient la liste des reservations et les vehicules utilises
      */
     public List<Map<String, Object>> getTrajets(LocalDate date) throws SQLException {
         List<Map<String, Object>> trajets = new ArrayList<>();
-        String query = "SELECT a.id_vehicule, v.marque, v.modele, v.immatriculation, v.capacite, v.carburant, " +
-                "a.heure_depart as heure_depart, a.heure_arrivee as heure_retour_aeroport, " +
+        String query = "SELECT a.heure_depart as heure_depart, " +
+                "MAX(a.heure_arrivee) as heure_retour_aeroport, " +
+                "COALESCE(MAX(a.kilometrage), 0) as kilometrage_parcouru, " +
                 "COUNT(a.id_reservation) as nb_reservations, " +
                 "SUM(r.nbPassager) as total_passagers, " +
-                "COALESCE(MAX(d.distance_km), 0) as distance_aller_km " +
-                "FROM assignation a " +
-                "JOIN vehicule v ON a.id_vehicule = v.id_vehicule " +
-                "JOIN reservation r ON a.id_reservation = r.id_reservation " +
-                "LEFT JOIN distance d ON d.id_from = ? AND d.id_to = r.id_hotel " +
-                "WHERE DATE(a.heure_depart) = ? " +
-                "GROUP BY a.id_vehicule, v.marque, v.modele, v.immatriculation, v.capacite, v.carburant, a.heure_depart, a.heure_arrivee "
+                "COALESCE(a.id_hotel, r.id_hotel) as id_hotel, " +
+                "h.nom as hotel_nom, " +
+                "COUNT(DISTINCT a.id_vehicule) as nb_vehicules, " +
+                "STRING_AGG(DISTINCT (v.marque || ' ' || v.modele), ', ') as vehicules_utilises, " +
+                "STRING_AGG( " +
+                "  ('Res ' || r.id_reservation || ' (client ' || r.id_client || ', ' || r.nbPassager || ' pax, vol ' || TO_CHAR(r.dateHeure, 'HH24:MI') || ')'), "
                 +
-                "ORDER BY a.heure_depart ASC, a.id_vehicule ASC";
+                "  ' | ' ORDER BY r.dateHeure, r.id_reservation " +
+                ") as details_reservations " +
+                "FROM assignation a " +
+                "JOIN reservation r ON a.id_reservation = r.id_reservation " +
+                "JOIN vehicule v ON a.id_vehicule = v.id_vehicule " +
+                "JOIN hotel h ON h.id_hotel = COALESCE(a.id_hotel, r.id_hotel) " +
+                "WHERE DATE(a.heure_depart) = ? " +
+                "GROUP BY a.heure_depart, COALESCE(a.id_hotel, r.id_hotel), h.nom " +
+                "ORDER BY a.heure_depart ASC";
 
-        Map<Integer, Integer> compteurTrajetsParVehicule = new HashMap<>();
+        int indexTrajet = 0;
 
         try (Connection conn = DatabaseConnection.getConnection();
                 PreparedStatement pstmt = conn.prepareStatement(query)) {
 
-            pstmt.setInt(1, ID_AEROPORT);
-            pstmt.setDate(2, java.sql.Date.valueOf(date));
+            pstmt.setDate(1, java.sql.Date.valueOf(date));
 
             try (ResultSet rs = pstmt.executeQuery()) {
                 while (rs.next()) {
                     Map<String, Object> trajet = new HashMap<>();
 
-                    int idVehicule = rs.getInt("id_vehicule");
-                    int nbTrajets = compteurTrajetsParVehicule.getOrDefault(idVehicule, 0) + 1;
-                    compteurTrajetsParVehicule.put(idVehicule, nbTrajets);
-
-                    int capacite = rs.getInt("capacite");
                     int totalPassagers = rs.getInt("total_passagers");
-                    int placesRestantes = capacite - totalPassagers;
-                    double distanceAller = rs.getDouble("distance_aller_km");
-                    double kilometrageParcouru = distanceAller * 2.0;
+                    double kilometrageParcouru = rs.getDouble("kilometrage_parcouru");
 
                     LocalDateTime heureDepart = rs.getTimestamp("heure_depart").toLocalDateTime();
                     LocalDateTime heureRetourAeroport = rs.getTimestamp("heure_retour_aeroport").toLocalDateTime();
 
-                    trajet.put("idVehicule", idVehicule);
-                    trajet.put("vehicule", rs.getString("marque") + " " + rs.getString("modele"));
-                    trajet.put("immatriculation", rs.getString("immatriculation"));
-                    trajet.put("capacite", capacite);
-                    trajet.put("carburant", rs.getString("carburant"));
+                    indexTrajet++;
+
                     trajet.put("heureDepart", heureDepart);
-                    trajet.put("heureArrivee", heureRetourAeroport); // compatibilite ancien affichage
                     trajet.put("heureRetourAeroport", heureRetourAeroport);
                     trajet.put("nbReservations", rs.getInt("nb_reservations"));
                     trajet.put("totalPassagers", totalPassagers);
-                    trajet.put("placesRestantes", placesRestantes);
                     trajet.put("kilometrageParcouru", kilometrageParcouru);
-                    trajet.put("nbTrajetsVehicule", nbTrajets);
+                    trajet.put("idHotel", rs.getInt("id_hotel"));
+                    trajet.put("hotel", rs.getString("hotel_nom"));
+                    trajet.put("nbVehicules", rs.getInt("nb_vehicules"));
+                    trajet.put("vehiculesUtilises", rs.getString("vehicules_utilises"));
+                    trajet.put("detailsReservations", rs.getString("details_reservations"));
+                    trajet.put("numeroTrajet", indexTrajet);
 
                     trajets.add(trajet);
                 }
@@ -643,7 +661,8 @@ public class AssignationService {
      */
     public List<Assignation> getAssignationsByDate(LocalDate date) throws SQLException {
         List<Assignation> assignations = new ArrayList<>();
-        String query = "SELECT a.id_assignation, a.id_reservation, a.id_vehicule, a.heure_depart, a.heure_arrivee, " +
+        String query = "SELECT a.id_assignation, a.id_reservation, a.id_vehicule, a.heure_depart, a.heure_arrivee, a.kilometrage, a.id_hotel, "
+                +
                 "r.id_client, r.nbPassager, r.dateHeure, r.id_hotel, " +
                 "h.nom as hotel_nom, h.code as hotel_code, h.libelle as hotel_libelle, " +
                 "v.marque, v.modele, v.immatriculation, v.capacite, v.carburant " +
@@ -667,6 +686,8 @@ public class AssignationService {
                     assignation.setIdVehicule(rs.getInt("id_vehicule"));
                     assignation.setHeureDepart(rs.getTimestamp("heure_depart").toLocalDateTime());
                     assignation.setHeureArrivee(rs.getTimestamp("heure_arrivee").toLocalDateTime());
+                    assignation.setKilometrage(rs.getDouble("kilometrage"));
+                    assignation.setIdHotel(rs.getInt("id_hotel"));
 
                     Reservation reservation = new Reservation();
                     reservation.setIdReservation(rs.getInt("id_reservation"));

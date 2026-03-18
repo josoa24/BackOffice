@@ -238,41 +238,50 @@
                 <% if (trajets != null && !trajets.isEmpty()) { %>
                 <div class="card">
                     <div class="card-header">
-                        <span><i class="fas fa-route me-2" style="color:#059669"></i> Trajets Planifies (Sprint 6)</span>
+                        <span><i class="fas fa-route me-2" style="color:#059669"></i> Trajets Planifies (Sprint 5-6)</span>
                         <span class="badge-places"><%= trajets.size() %> trajet(s)</span>
                     </div>
                     <div class="card-body">
                         <% for (Map<String, Object> t : trajets) {
-                            int capacite = (int) t.get("capacite");
                             int totalP = (int) t.get("totalPassagers");
-                            int placesRestantes = (int) t.get("placesRestantes");
-                            int pourcentage = (capacite > 0) ? (totalP * 100 / capacite) : 0;
-                            String barColor = pourcentage > 80 ? "#dc3545" : pourcentage > 50 ? "#ffc107" : "#28a745";
+                            String detailsReservations = (String) t.get("detailsReservations");
+                            String[] detailsList = detailsReservations != null ? detailsReservations.split("\\\\|\\\\s*") : new String[0];
                         %>
                         <div class="trajet-card">
                             <div class="trajet-header">
                                 <div>
-                                    <span class="trajet-vehicule"><i class="fas fa-bus me-2" style="color:#667eea"></i> <%= t.get("vehicule") %></span>
-                                    <span style="color:#9ba4b5; font-size:12px; margin-left:8px;"><%= t.get("immatriculation") %></span>
+                                    <span class="trajet-vehicule">
+                                        <i class="fas fa-bus me-2" style="color:#667eea"></i>
+                                        Trajet #<%= t.get("numeroTrajet") %> - Groupe Sprint 5
+                                    </span>
+                                    <span style="color:#9ba4b5; font-size:12px; margin-left:8px;">
+                                        Destination: <%= t.get("hotel") %>
+                                    </span>
                                 </div>
-                                <span class="badge-<%= "diesel".equals(t.get("carburant")) ? "diesel" : "essence" %>">
-                                    <i class="fas fa-gas-pump"></i> <%= t.get("carburant") %>
+                                <span class="badge-places">
+                                    <i class="fas fa-car me-1"></i> <%= t.get("nbVehicules") %> vehicule(s)
                                 </span>
                             </div>
                             <div class="trajet-detail">
                                 <span><i class="fas fa-clock" style="color:#059669"></i> Depart aeroport: <strong><%= ((java.time.LocalDateTime)t.get("heureDepart")).format(timeFormatter) %></strong></span>
                                 <span><i class="fas fa-plane-arrival" style="color:#d97706"></i> Retour aeroport: <strong><%= ((java.time.LocalDateTime)t.get("heureRetourAeroport")).format(timeFormatter) %></strong></span>
                                 <span><i class="fas fa-ticket-alt" style="color:#667eea"></i> <%= t.get("nbReservations") %> reservation(s)</span>
-                                <span><i class="fas fa-users" style="color:#e65100"></i> <%= totalP %>/<%= capacite %> passagers</span>
-                                <span><i class="fas fa-chair" style="color:#059669"></i> <%= placesRestantes %> places restantes</span>
+                                <span><i class="fas fa-users" style="color:#e65100"></i> <%= totalP %> passagers</span>
                                 <span><i class="fas fa-road" style="color:#7c3aed"></i> <%= String.format("%.1f", (Double)t.get("kilometrageParcouru")) %> km</span>
-                                <span><i class="fas fa-repeat" style="color:#2563eb"></i> Trajet #<%= t.get("nbTrajetsVehicule") %></span>
                             </div>
-                            <div class="mt-2">
-                                <div class="progress" style="height:8px; border-radius:4px;">
-                                    <div class="progress-bar" style="width:<%= pourcentage %>%; background:<%= barColor %>; border-radius:4px;"></div>
+                            <div class="mt-2 p-2" style="background:#f8f9fd; border-radius:8px;">
+                                <small class="d-block" style="color:#5a6178; font-weight:600; margin-bottom:6px;">
+                                    <i class="fas fa-car-side me-1" style="color:#2563eb"></i> Vehicules utilises :
+                                    <%= t.get("vehiculesUtilises") %>
+                                </small>
+                                <small class="d-block" style="color:#5a6178; font-weight:600; margin-bottom:6px;">
+                                    <i class="fas fa-list me-1" style="color:#059669"></i> Reservations du groupe :
+                                </small>
+                                <div style="display:flex; flex-direction:column; gap:4px;">
+                                    <% for (String detail : detailsList) { %>
+                                        <small style="color:#6b7280;"><i class="fas fa-check-circle me-1" style="color:#10b981"></i><%= detail.trim() %></small>
+                                    <% } %>
                                 </div>
-                                <small style="color:#9ba4b5; font-size:11px;">Remplissage : <%= pourcentage %>%</small>
                             </div>
                         </div>
                         <% } %>

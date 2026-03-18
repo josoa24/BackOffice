@@ -45,6 +45,5 @@ Sprint 6 : Gestion du nombre de trajets
             Heure de retour à l’aéroport
 
 A corriger : 
-    heure depart retour aeroport
-    nom vehicule modifié par vehicule 1 , vehicule 2 , ...
-    
+    heure depart retour aeroport : calculable à partir de la vitesse moyenne et la distance
+    nom vehicule modifié par vehicule 1 , vehicule 2 , ... dans la base mais pas minibus ....
