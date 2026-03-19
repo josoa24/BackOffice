@@ -15,6 +15,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 
 import entity.Assignation;
 import entity.Hotel;
@@ -464,31 +465,55 @@ public class AssignationService {
             return null;
         }
 
-        // Sprint 6:
-        // 1) moins de trajets effectues
-        // 2) si egalite: diesel prioritaire
-        // 3) puis capacite la plus grande
-        candidats.sort((a, b) -> {
-            int trajetsA = a.getNombreTrajetsEffectuesA(heureDepart);
-            int trajetsB = b.getNombreTrajetsEffectuesA(heureDepart);
-            if (trajetsA != trajetsB) {
-                return Integer.compare(trajetsA, trajetsB);
+        // Sprint 6 (ordre exige par la regle):
+        // 1) plus grande capacite par rapport au nombre de trajets effectues (ratio
+        // capacite/(trajets+1))
+        // 2) ensuite le moins de trajets (meme si essence)
+        // 3) si meme nombre de trajets: diesel prioritaire
+        // 4) si encore egalite complete: choix aleatoire
+
+        // Etape 1: meilleur ratio capacite/trajets
+        double meilleurRatio = Double.NEGATIVE_INFINITY;
+        List<EtatVehicule> meilleursRatio = new ArrayList<>();
+        for (EtatVehicule etat : candidats) {
+            int trajets = etat.getNombreTrajetsEffectuesA(heureDepart);
+            double ratio = etat.vehicule.getCapacite() / (double) (trajets + 1);
+
+            if (ratio > meilleurRatio) {
+                meilleurRatio = ratio;
+                meilleursRatio.clear();
+                meilleursRatio.add(etat);
+            } else if (Double.compare(ratio, meilleurRatio) == 0) {
+                meilleursRatio.add(etat);
             }
+        }
 
-            boolean dieselA = "diesel".equalsIgnoreCase(a.vehicule.getCarburant());
-            boolean dieselB = "diesel".equalsIgnoreCase(b.vehicule.getCarburant());
-            if (dieselA != dieselB) {
-                return dieselA ? -1 : 1;
+        // Etape 2: moins de trajets
+        int minTrajets = Integer.MAX_VALUE;
+        List<EtatVehicule> meilleursTrajets = new ArrayList<>();
+        for (EtatVehicule etat : meilleursRatio) {
+            int trajets = etat.getNombreTrajetsEffectuesA(heureDepart);
+            if (trajets < minTrajets) {
+                minTrajets = trajets;
+                meilleursTrajets.clear();
+                meilleursTrajets.add(etat);
+            } else if (trajets == minTrajets) {
+                meilleursTrajets.add(etat);
             }
+        }
 
-            if (a.vehicule.getCapacite() != b.vehicule.getCapacite()) {
-                return Integer.compare(b.vehicule.getCapacite(), a.vehicule.getCapacite());
+        // Etape 3: diesel prioritaire si meme nb trajets
+        List<EtatVehicule> dieselCandidats = new ArrayList<>();
+        for (EtatVehicule etat : meilleursTrajets) {
+            if ("diesel".equalsIgnoreCase(etat.vehicule.getCarburant())) {
+                dieselCandidats.add(etat);
             }
+        }
+        List<EtatVehicule> finalistes = dieselCandidats.isEmpty() ? meilleursTrajets : dieselCandidats;
 
-            return Integer.compare(a.vehicule.getIdVehicule(), b.vehicule.getIdVehicule());
-        });
-
-        return candidats.get(0);
+        // Etape 4: aleatoire si encore egalite
+        int idx = ThreadLocalRandom.current().nextInt(finalistes.size());
+        return finalistes.get(idx);
     }
 
     private void enregistrerBatchAssignationsPartielles(
