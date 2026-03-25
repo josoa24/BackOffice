@@ -71,9 +71,9 @@ INSERT INTO hotel (nom, code, libelle) VALUES
 -- 1->2 = 6 km (aller), A/R = 12 km, duree A/R = 12 min a 60 km/h
 -- 1->3 = 8 km (aller), A/R = 16 km, duree A/R = 16 min a 60 km/h
 INSERT INTO distance (id_from, id_to, distance_km) VALUES
-(1, 2, 6.0),
+(1, 2, 10);
+INSERT INTO distance (id_from, id_to, distance_km) VALUES 
 (1, 3, 8.0);
-
 -- 5) Vehicules
 -- V1/V2: meme capacite + meme carburant pour permettre random final (regle 4)
 -- V3: diesel 8 places pour priorite diesel (regle 3)
