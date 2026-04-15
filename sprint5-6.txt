@@ -1,0 +1,49 @@
+Sprint 5 : Gestion du temps d’attente
+    Principe
+        On regroupe les réservations des vols qui arrivent dans un intervalle de temps d’attente (TA).
+        Si un nouveau vol arrive pendant cet intervalle, sa réservation est ajoutée au même regroupement.
+    Exemple
+        Temps d’attente (TA) = 30 minutes
+        Les vols arrivant entre 8h00 et 8h30 sont regroupés dans le même groupe.
+        S’il n’y a aucun vol après 8h00, alors le départ se fait à 8h00.
+        Si un vol arrive à 9h15, on ajoute 30 minutes de temps d’attente, donc on attend jusqu’à 9h45.
+        Tous les véhicules du groupe partent en même temps.
+    Exemple logique
+        Véhicules disponibles : 4
+            8h15 : premier vol
+                → +30 minutes de temps d’attente
+                → attente jusqu’à 8h45
+        Pendant cet intervalle :
+            Client 1 : 5 passagers (vol à 8h15)
+            Client 2 : 8 passagers (vol à 8h25)
+            Client 3 : 6 passagers (vol à 8h32)
+            Vol à 8h50 (Client 4)
+                → ne fait pas partie de ce regroupement
+                → sera dans le regroupement suivant
+            ➡️ Donc le regroupement des réservations partira à 8h32.
+
+Sprint 6 : Gestion du nombre de trajets
+    Hypothèse
+        Le compteur de trajets des véhicules commence à 00:00.
+    Règles de sélection du véhicule
+        Pour choisir le véhicule à envoyer :
+            On vérifie le véhicule ayant la plus grande capacité par rapport au nombre de trajets effectués.
+            Le véhicule ayant le moins de trajets est prioritaire, même s’il fonctionne à essence.
+            Si les véhicules ont exactement le même nombre de trajets, alors on privilégie le véhicule diesel.
+    Exemple
+        Vehicule1 :
+            Départ : 8h30
+            Retour : 9h30
+        Donc ce véhicule sera disponible à partir de 9h31.
+        Définition d’un véhicule disponible : Un véhicule disponible est un véhicule qui n’est pas actuellement en trajet.
+    Structure des trajets : 
+        Chaque trajet doit contenir les informations suivantes :
+            Heure de départ de l’aéroport
+            Véhicule utilisé
+            Liste des réservations
+            Kilométrage parcouru
+            Heure de retour à l’aéroport
+
+A corriger : 
+    heure depart retour aeroport : calculable à partir de la vitesse moyenne et la distance
+    nom vehicule modifié par vehicule 1 , vehicule 2 , ... dans la base mais pas minibus ....

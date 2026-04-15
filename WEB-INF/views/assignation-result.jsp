@@ -139,7 +139,7 @@
                 <span class="header-icon"><i class="fas fa-clipboard-check"></i></span>
                 Resultat de la Planification
             </h1>
-            <span class="header-subtitle">Sprint 3-4 : Assignation automatique avec regles de gestion</span>
+            <span class="header-subtitle">Sprint 5-6 : Regroupement temporel et priorite par nombre de trajets</span>
         </div>
         <div style="display:flex;align-items:center;gap:12px;">
             <div class="header-date">
@@ -237,12 +237,12 @@
         </div>
         <% } %>
 
-        <!-- Regroupement par vehicule (Sprint 4) -->
+        <!-- Regroupement par vehicule (Sprint 5-6) -->
         <div class="card anim">
             <div class="card-header-custom">
                 <div class="card-title">
                     <span class="title-dot" style="background:#10b981"></span>
-                    Trajets par Vehicule (Sprint 4 - Multi-reservations)
+                    Trajets par Vehicule (Sprint 5-6)
                 </div>
                 <span class="card-badge"><%= parVehicule.size() %> vehicule(s)</span>
             </div>
@@ -273,8 +273,8 @@
                             </span>
                             <span><i class="fas fa-users" style="color:#e65100"></i> <strong><%= totalPassagers %>/<%= capacite %></strong> passagers</span>
                             <span><i class="fas fa-chair" style="color:#059669"></i> <%= placesRestantes %> restantes</span>
-                            <span><i class="fas fa-clock" style="color:#059669"></i> Depart: <strong><%= first.getHeureDepart().format(timeFormatter) %></strong></span>
-                            <span><i class="fas fa-flag-checkered" style="color:#d97706"></i> Arrivee: <strong><%= first.getHeureArrivee().format(timeFormatter) %></strong></span>
+                            <span><i class="fas fa-clock" style="color:#059669"></i> Depart aeroport: <strong><%= first.getHeureDepart().format(timeFormatter) %></strong></span>
+                            <span><i class="fas fa-plane-arrival" style="color:#d97706"></i> Retour aeroport: <strong><%= first.getHeureArrivee().format(timeFormatter) %></strong></span>
                         </div>
                     </div>
                     <table class="table-modern">
@@ -284,8 +284,8 @@
                                 <th>Client</th>
                                 <th>Passagers</th>
                                 <th>Lieu (Hotel)</th>
-                                <th>Heure Depart</th>
-                                <th>Heure Arrivee</th>
+                                <th>Depart Aeroport</th>
+                                <th>Retour Aeroport</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -337,8 +337,8 @@
                             <th>Vehicule</th>
                             <th>Capacite</th>
                             <th>Carburant</th>
-                            <th>Heure Depart</th>
-                            <th>Heure Arrivee</th>
+                            <th>Depart Aeroport</th>
+                            <th>Retour Aeroport</th>
                         </tr>
                     </thead>
                     <tbody>
