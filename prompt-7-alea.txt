@@ -1,0 +1,3 @@
+Maintenant , vous savez que on est sur le sprint5-6-7 donc on va corriger peut etre le logique ou l'algorithme car le vrai resultats de l'assignations est comme ça donc verrifier puis corriger où sont le source de probleme , et apres normalement le resultats affiché dans la page d'assignation est comme dans l'image ci-dessus : 
+puiis , donnez moi c'est quoi le probleme d'algorithme actuel : 
+

@@ -195,7 +195,6 @@ public class AssignationController {
                 mv.setData("assignations", new ArrayList<Assignation>());
             }
         }
-
         return mv;
     }
 }
