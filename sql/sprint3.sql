@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS vehicule (
     modele VARCHAR(50) NOT NULL,
     immatriculation VARCHAR(20) UNIQUE NOT NULL,
     capacite INT NOT NULL,
-    carburant VARCHAR(20) NOT NULL DEFAULT 'essence' -- 'diesel' ou 'essence'
+    carburant VARCHAR(20) NOT NULL DEFAULT 'essence', -- 'diesel' ou 'essence'
+    heure_debut_disponibilite TIME NOT NULL DEFAULT '00:00:00'
 );
 
 -- Table Distance entre hotels/aéroport

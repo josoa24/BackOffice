@@ -58,8 +58,13 @@ CREATE TABLE vehicule (
     modele VARCHAR(50) NOT NULL,
     immatriculation VARCHAR(20) UNIQUE NOT NULL,
     capacite INT NOT NULL,
-    carburant VARCHAR(20) NOT NULL DEFAULT 'essence'
+    carburant VARCHAR(20) NOT NULL DEFAULT 'essence',
+    heure_debut_disponibilite TIME NOT NULL DEFAULT '00:00:00'
 );
+
+ALTER TABLE vehicule ADD COLUMN IF NOT EXISTS heure_debut_disponibilite TIME NOT NULL DEFAULT '00:00:00';
+
+DROP TABLE vehicule;
 
 -- ============================================================
 -- 4. TABLE PARAMETRE

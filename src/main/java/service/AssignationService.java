@@ -8,13 +8,14 @@ import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 
 import entity.Assignation;
 import entity.Hotel;
@@ -26,8 +27,8 @@ public class AssignationService {
     private VehiculeService vehiculeService = new VehiculeService();
     private ParametreService parametreService = new ParametreService();
 
-    // ID de l'aeroport (point de depart et retour des trajets)
-    private static final int ID_AEROPORT = 1;
+    // ID aeroport par defaut si le code AER n'est pas trouve
+    private static final int ID_AEROPORT_PAR_DEFAUT = 1;
 
     private static class GroupeAttente {
         private LocalDateTime heureDebutFenetre;
@@ -71,6 +72,11 @@ public class AssignationService {
         }
 
         boolean estDisponibleA(LocalDateTime heureDepart) {
+            LocalTime heureDebutDisponibilite = vehicule.getHeureDebutDisponibilite();
+            if (heureDebutDisponibilite != null && heureDepart.toLocalTime().isBefore(heureDebutDisponibilite)) {
+                return false;
+            }
+
             for (TrajetVehicule t : trajets) {
                 // Disponible seulement APRES l'heure de retour (retour + 1 minute gere par le
                 // caller)
@@ -96,18 +102,49 @@ public class AssignationService {
         }
     }
 
+    private static class DemandeReservation {
+        private Reservation reservation;
+        private int passagersRestants;
+        private int prioriteInitiale;
+        private LocalDateTime heureVol;
+        private boolean reportPrioritaire;
+
+        DemandeReservation(Reservation reservation, boolean reportPrioritaire) {
+            this.reservation = reservation;
+            this.passagersRestants = reservation.getNbPassager();
+            this.prioriteInitiale = reservation.getNbPassager();
+            this.heureVol = reservation.getDateHeure();
+            this.reportPrioritaire = reportPrioritaire;
+        }
+    }
+
+    private static class AllocationPartielle {
+        private Reservation reservation;
+        private int nbPassagersAssignes;
+
+        AllocationPartielle(Reservation reservation, int nbPassagersAssignes) {
+            this.reservation = reservation;
+            this.nbPassagersAssignes = nbPassagersAssignes;
+        }
+    }
+
     /**
      * Recupere les reservations NON ASSIGNEES pour une date donnee
      * Avec les informations de l'hotel
      */
     public List<Reservation> getReservationsNonAssignees(LocalDate date) throws SQLException {
         List<Reservation> reservations = new ArrayList<>();
-        String query = "SELECT r.id_reservation, r.id_client, r.nbPassager, r.dateHeure, r.id_hotel, " +
+        String query = "SELECT r.id_reservation, r.id_client, " +
+                "(r.nbPassager - COALESCE(SUM(a.nb_passagers_assignes), 0)) as nbPassager, " +
+                "r.dateHeure, r.id_hotel, " +
                 "h.nom as hotel_nom, h.code as hotel_code, h.libelle as hotel_libelle " +
                 "FROM reservation r " +
                 "JOIN hotel h ON r.id_hotel = h.id_hotel " +
+                "LEFT JOIN assignation a ON a.id_reservation = r.id_reservation " +
                 "WHERE DATE(r.dateHeure) = ? " +
-                "AND NOT EXISTS (SELECT 1 FROM assignation a WHERE a.id_reservation = r.id_reservation) " +
+                "GROUP BY r.id_reservation, r.id_client, r.nbPassager, r.dateHeure, r.id_hotel, h.nom, h.code, h.libelle "
+                +
+                "HAVING (r.nbPassager - COALESCE(SUM(a.nb_passagers_assignes), 0)) > 0 " +
                 "ORDER BY r.dateHeure ASC";
 
         try (Connection conn = DatabaseConnection.getConnection();
@@ -143,12 +180,13 @@ public class AssignationService {
      */
     public List<Map<String, Object>> getVehiculesAvecCapaciteRestante(LocalDate date) throws SQLException {
         List<Map<String, Object>> result = new ArrayList<>();
-        String query = "SELECT v.id_vehicule, v.marque, v.modele, v.immatriculation, v.capacite, v.carburant, " +
-                "COALESCE(SUM(r.nbPassager), 0) as passagers_assignes " +
+        String query = "SELECT v.id_vehicule, v.marque, v.modele, v.immatriculation, v.capacite, v.carburant, v.heure_debut_disponibilite, "
+                +
+                "COALESCE(SUM(a.nb_passagers_assignes), 0) as passagers_assignes " +
                 "FROM vehicule v " +
                 "LEFT JOIN assignation a ON v.id_vehicule = a.id_vehicule AND DATE(a.heure_depart) = ? " +
-                "LEFT JOIN reservation r ON a.id_reservation = r.id_reservation " +
-                "GROUP BY v.id_vehicule, v.marque, v.modele, v.immatriculation, v.capacite, v.carburant " +
+                "GROUP BY v.id_vehicule, v.marque, v.modele, v.immatriculation, v.capacite, v.carburant, v.heure_debut_disponibilite "
+                +
                 "ORDER BY v.capacite ASC";
 
         try (Connection conn = DatabaseConnection.getConnection();
@@ -166,6 +204,11 @@ public class AssignationService {
                     v.setImmatriculation(rs.getString("immatriculation"));
                     v.setCapacite(rs.getInt("capacite"));
                     v.setCarburant(rs.getString("carburant"));
+                    java.sql.Time heureDisponibiliteSql = rs.getTime("heure_debut_disponibilite");
+                    LocalTime heureDisponibilite = heureDisponibiliteSql != null
+                            ? heureDisponibiliteSql.toLocalTime()
+                            : LocalTime.MIN;
+                    v.setHeureDebutDisponibilite(heureDisponibilite);
 
                     int passagersAssignes = rs.getInt("passagers_assignes");
                     int placesRestantes = v.getCapacite() - passagersAssignes;
@@ -183,23 +226,54 @@ public class AssignationService {
     /**
      * Pre-charge toutes les distances depuis l'aeroport en une seule requete
      */
+    private int getIdAeroport(Connection conn) throws SQLException {
+        String query = "SELECT id_hotel FROM hotel WHERE UPPER(code) = 'AER' ORDER BY id_hotel LIMIT 1";
+        try (PreparedStatement pstmt = conn.prepareStatement(query);
+                ResultSet rs = pstmt.executeQuery()) {
+            if (rs.next()) {
+                return rs.getInt("id_hotel");
+            }
+        }
+        return ID_AEROPORT_PAR_DEFAUT;
+    }
+
     private Map<Integer, Double> chargerDistancesDepuisAeroport() throws SQLException {
         Map<Integer, Double> distances = new HashMap<>();
-        String query = "SELECT id_to, distance_km FROM distance WHERE id_from = ?";
+        String query = "SELECT id_from, id_to, distance_km FROM distance WHERE id_from = ? OR id_to = ?";
 
         Connection conn = DatabaseConnection.getConnection();
+        int idAeroport = getIdAeroport(conn);
         PreparedStatement pstmt = conn.prepareStatement(query);
-        pstmt.setInt(1, ID_AEROPORT);
+        pstmt.setInt(1, idAeroport);
+        pstmt.setInt(2, idAeroport);
         ResultSet rs = pstmt.executeQuery();
 
         while (rs.next()) {
-            distances.put(rs.getInt("id_to"), rs.getDouble("distance_km"));
+            int idFrom = rs.getInt("id_from");
+            int idTo = rs.getInt("id_to");
+            double distance = rs.getDouble("distance_km");
+
+            if (idFrom == idAeroport && idTo != idAeroport) {
+                distances.put(idTo, distance);
+            } else if (idTo == idAeroport && idFrom != idAeroport) {
+                distances.putIfAbsent(idFrom, distance);
+            }
         }
 
         rs.close();
         pstmt.close();
 
         return distances;
+    }
+
+    private double getDistanceAllerKm(int idHotel, Map<Integer, Double> distancesMap) throws SQLException {
+        Double distance = distancesMap.get(idHotel);
+        if (distance == null || distance <= 0.0) {
+            throw new SQLException(
+                    "Distance aeroport-hotel introuvable ou invalide pour id_hotel=" + idHotel
+                            + ". Verifiez la table distance.");
+        }
+        return distance;
     }
 
     /**
@@ -225,6 +299,7 @@ public class AssignationService {
         Map<Integer, EtatVehicule> etatsVehicules = chargerEtatVehicules(date, tousVehicules);
 
         List<GroupeAttente> groupesAttente = construireGroupesAttente(reservations, tempsAttente);
+        Map<Integer, List<DemandeReservation>> reportsParHotel = new HashMap<>();
 
         for (GroupeAttente groupeAttente : groupesAttente) {
             Map<Integer, List<Reservation>> groupesParHotel = new LinkedHashMap<>();
@@ -242,77 +317,74 @@ public class AssignationService {
                 int idHotel = entry.getKey();
                 List<Reservation> groupeReservations = entry.getValue();
 
-                double distanceAllerKm = distancesMap.getOrDefault(idHotel, 0.0);
+                double distanceAllerKm = getDistanceAllerKm(idHotel, distancesMap);
                 int tempsRouteAllerMinutes = (int) Math.ceil((distanceAllerKm / vitesse) * 60);
                 LocalDateTime heureDepart = groupeAttente.heureDepartGroupe;
                 LocalDateTime heureRetourAeroport = heureDepart.plusMinutes(tempsRouteAllerMinutes * 2L);
 
-                List<Reservation> restantes = new ArrayList<>(groupeReservations);
-                restantes.sort((a, b) -> Integer.compare(b.getNbPassager(), a.getNbPassager()));
+                List<DemandeReservation> demandes = new ArrayList<>();
+                List<DemandeReservation> reports = reportsParHotel.remove(idHotel);
+                if (reports != null && !reports.isEmpty()) {
+                    demandes.addAll(reports);
+                }
+                for (Reservation r : groupeReservations) {
+                    demandes.add(new DemandeReservation(r, false));
+                }
 
-                while (!restantes.isEmpty()) {
-                    int totalRestant = 0;
-                    for (Reservation r : restantes) {
-                        totalRestant += r.getNbPassager();
-                    }
-
+                while (!demandes.isEmpty()) {
                     EtatVehicule etat = choisirVehiculePourCapacite(
-                            totalRestant,
-                            heureDepart,
-                            etatsVehicules,
-                            true);
-
-                    if (etat != null) {
-                        double kilometrage = distanceAllerKm * 2.0;
-                        enregistrerBatchAssignations(
-                                restantes,
-                                etat,
-                                heureDepart,
-                                heureRetourAeroport,
-                                kilometrage,
-                                idHotel,
-                                nouvellesAssignations);
-                        restantes.clear();
-                        continue;
-                    }
-
-                    etat = choisirVehiculePourCapacite(
                             1,
                             heureDepart,
                             etatsVehicules,
                             false);
 
                     if (etat == null) {
-                        System.err.println("Aucun vehicule disponible pour le groupe hotel " + idHotel +
-                                " a " + heureDepart + ". Reservations restantes: " + restantes.size());
+                        int passagersNonAssignes = 0;
+                        for (DemandeReservation d : demandes) {
+                            passagersNonAssignes += d.passagersRestants;
+                        }
+                        System.err.println("Capacite insuffisante pour le groupe hotel " + idHotel +
+                                " a " + heureDepart + ". Passagers reportes: " + passagersNonAssignes);
+                        // Sprint 7: report vers le prochain regroupement/vol du meme hotel
+                        for (DemandeReservation d : demandes) {
+                            d.reportPrioritaire = true;
+                        }
+                        reportsParHotel.computeIfAbsent(idHotel, k -> new ArrayList<>()).addAll(demandes);
                         break;
                     }
 
                     int capaciteVehicule = etat.vehicule.getCapacite();
-                    List<Reservation> assigneesACeVehicule = new ArrayList<>();
-                    int passagersDansVehicule = 0;
+                    int capaciteRestanteVehicule = capaciteVehicule;
+                    List<AllocationPartielle> allocations = new ArrayList<>();
 
-                    Iterator<Reservation> it = restantes.iterator();
-                    while (it.hasNext()) {
-                        Reservation r = it.next();
-                        if (passagersDansVehicule + r.getNbPassager() <= capaciteVehicule) {
-                            assigneesACeVehicule.add(r);
-                            passagersDansVehicule += r.getNbPassager();
-                            it.remove();
+                    while (!demandes.isEmpty() && capaciteRestanteVehicule > 0) {
+                        DemandeReservation d = choisirDemandePlusProcheDuLibre(demandes, capaciteRestanteVehicule);
+                        if (d == null) {
+                            break;
+                        }
+
+                        int nbAffectes = Math.min(d.passagersRestants, capaciteRestanteVehicule);
+                        if (nbAffectes <= 0) {
+                            demandes.remove(d);
+                            continue;
+                        }
+
+                        allocations.add(new AllocationPartielle(d.reservation, nbAffectes));
+                        d.passagersRestants -= nbAffectes;
+                        capaciteRestanteVehicule -= nbAffectes;
+
+                        if (d.passagersRestants == 0) {
+                            demandes.remove(d);
                         }
                     }
 
-                    // Evite une boucle infinie si une reservation depasse toutes les capacites
-                    if (assigneesACeVehicule.isEmpty()) {
-                        Reservation nonAssignable = restantes.remove(0);
-                        System.err.println("Reservation non assignable (capacite insuffisante): id="
-                                + nonAssignable.getIdReservation() + ", passagers=" + nonAssignable.getNbPassager());
-                        continue;
+                    if (allocations.isEmpty()) {
+                        break;
                     }
 
                     double kilometrage = distanceAllerKm * 2.0;
-                    enregistrerBatchAssignations(
-                            assigneesACeVehicule,
+                    enregistrerBatchAssignationsPartielles(
+                            allocations,
                             etat,
                             heureDepart,
                             heureRetourAeroport,
@@ -324,6 +396,72 @@ public class AssignationService {
         }
 
         return nouvellesAssignations;
+    }
+
+    /**
+     * Selection dynamique de la demande la plus proche des places libres du
+     * vehicule.
+     * Priorites:
+     * 1) reports en attente
+     * 2) proximite avec la capacite libre (valeur absolue)
+     * 3) heure de vol la plus ancienne
+     * 4) id_reservation croissant
+     */
+    private DemandeReservation choisirDemandePlusProcheDuLibre(
+            List<DemandeReservation> demandes,
+            int capaciteRestanteVehicule) {
+        if (demandes == null || demandes.isEmpty()) {
+            return null;
+        }
+
+        DemandeReservation meilleure = null;
+        int meilleurEcart = Integer.MAX_VALUE;
+
+        for (DemandeReservation d : demandes) {
+            if (d.passagersRestants <= 0) {
+                continue;
+            }
+
+            if (meilleure == null) {
+                meilleure = d;
+                meilleurEcart = Math.abs(d.passagersRestants - capaciteRestanteVehicule);
+                continue;
+            }
+
+            if (d.reportPrioritaire && !meilleure.reportPrioritaire) {
+                meilleure = d;
+                meilleurEcart = Math.abs(d.passagersRestants - capaciteRestanteVehicule);
+                continue;
+            }
+            if (!d.reportPrioritaire && meilleure.reportPrioritaire) {
+                continue;
+            }
+
+            int ecart = Math.abs(d.passagersRestants - capaciteRestanteVehicule);
+            if (ecart < meilleurEcart) {
+                meilleure = d;
+                meilleurEcart = ecart;
+                continue;
+            }
+            if (ecart > meilleurEcart) {
+                continue;
+            }
+
+            int cmpHeure = d.heureVol.compareTo(meilleure.heureVol);
+            if (cmpHeure < 0) {
+                meilleure = d;
+                continue;
+            }
+            if (cmpHeure > 0) {
+                continue;
+            }
+
+            if (d.reservation.getIdReservation() < meilleure.reservation.getIdReservation()) {
+                meilleure = d;
+            }
+        }
+
+        return meilleure;
     }
 
     private List<GroupeAttente> construireGroupesAttente(List<Reservation> reservations, int tempsAttenteMinutes) {
@@ -433,35 +571,59 @@ public class AssignationService {
             return null;
         }
 
-        // Sprint 6:
-        // 1) moins de trajets effectues
-        // 2) si egalite: diesel prioritaire
-        // 3) puis capacite la plus grande
-        candidats.sort((a, b) -> {
-            int trajetsA = a.getNombreTrajetsEffectuesA(heureDepart);
-            int trajetsB = b.getNombreTrajetsEffectuesA(heureDepart);
-            if (trajetsA != trajetsB) {
-                return Integer.compare(trajetsA, trajetsB);
+        // Sprint 6 (ordre exige par la regle):
+        // 1) plus grande capacite par rapport au nombre de trajets effectues (ratio
+        // capacite/(trajets+1))
+        // 2) ensuite le moins de trajets (meme si essence)
+        // 3) si meme nombre de trajets: diesel prioritaire
+        // 4) si encore egalite complete: choix aleatoire
+
+        // Etape 1: meilleur ratio capacite/trajets
+        double meilleurRatio = Double.NEGATIVE_INFINITY;
+        List<EtatVehicule> meilleursRatio = new ArrayList<>();
+        for (EtatVehicule etat : candidats) {
+            int trajets = etat.getNombreTrajetsEffectuesA(heureDepart);
+            double ratio = etat.vehicule.getCapacite() / (double) (trajets + 1);
+
+            if (ratio > meilleurRatio) {
+                meilleurRatio = ratio;
+                meilleursRatio.clear();
+                meilleursRatio.add(etat);
+            } else if (Double.compare(ratio, meilleurRatio) == 0) {
+                meilleursRatio.add(etat);
             }
+        }
 
-            boolean dieselA = "diesel".equalsIgnoreCase(a.vehicule.getCarburant());
-            boolean dieselB = "diesel".equalsIgnoreCase(b.vehicule.getCarburant());
-            if (dieselA != dieselB) {
-                return dieselA ? -1 : 1;
+        // Etape 2: moins de trajets
+        int minTrajets = Integer.MAX_VALUE;
+        List<EtatVehicule> meilleursTrajets = new ArrayList<>();
+        for (EtatVehicule etat : meilleursRatio) {
+            int trajets = etat.getNombreTrajetsEffectuesA(heureDepart);
+            if (trajets < minTrajets) {
+                minTrajets = trajets;
+                meilleursTrajets.clear();
+                meilleursTrajets.add(etat);
+            } else if (trajets == minTrajets) {
+                meilleursTrajets.add(etat);
             }
+        }
 
-            if (a.vehicule.getCapacite() != b.vehicule.getCapacite()) {
-                return Integer.compare(b.vehicule.getCapacite(), a.vehicule.getCapacite());
+        // Etape 3: diesel prioritaire si meme nb trajets
+        List<EtatVehicule> dieselCandidats = new ArrayList<>();
+        for (EtatVehicule etat : meilleursTrajets) {
+            if ("diesel".equalsIgnoreCase(etat.vehicule.getCarburant())) {
+                dieselCandidats.add(etat);
             }
+        }
+        List<EtatVehicule> finalistes = dieselCandidats.isEmpty() ? meilleursTrajets : dieselCandidats;
 
-            return Integer.compare(a.vehicule.getIdVehicule(), b.vehicule.getIdVehicule());
-        });
-
-        return candidats.get(0);
+        // Etape 4: aleatoire si encore egalite
+        int idx = ThreadLocalRandom.current().nextInt(finalistes.size());
+        return finalistes.get(idx);
     }
 
-    private void enregistrerBatchAssignations(
-            List<Reservation> reservations,
+    private void enregistrerBatchAssignationsPartielles(
+            List<AllocationPartielle> allocations,
             EtatVehicule etatVehicule,
             LocalDateTime heureDepart,
             LocalDateTime heureRetourAeroport,
@@ -471,16 +633,18 @@ public class AssignationService {
 
         etatVehicule.ajouterTrajet(heureDepart, heureRetourAeroport);
 
-        for (Reservation r : reservations) {
+        for (AllocationPartielle allocation : allocations) {
             Assignation assignation = enregistrerAssignation(
-                    r.getIdReservation(),
+                    allocation.reservation.getIdReservation(),
                     etatVehicule.vehicule.getIdVehicule(),
                     heureDepart,
                     heureRetourAeroport,
                     kilometrage,
-                    idHotel);
-            assignation.setReservation(r);
+                    idHotel,
+                    allocation.nbPassagersAssignes);
+            assignation.setReservation(allocation.reservation);
             assignation.setVehicule(etatVehicule.vehicule);
+            assignation.setNbPassagersAssignes(allocation.nbPassagersAssignes);
             nouvellesAssignations.add(assignation);
         }
     }
@@ -489,9 +653,10 @@ public class AssignationService {
      * Enregistrer une assignation en base avec kilométrage et hôtel
      */
     public Assignation enregistrerAssignation(int idReservation, int idVehicule,
-            LocalDateTime heureDepart, LocalDateTime heureArrivee, double kilometrage, int idHotel)
+            LocalDateTime heureDepart, LocalDateTime heureArrivee, double kilometrage, int idHotel,
+            int nbPassagersAssignes)
             throws SQLException {
-        String query = "INSERT INTO assignation (id_reservation, id_vehicule, heure_depart, heure_arrivee, kilometrage, id_hotel) VALUES (?, ?, ?, ?, ?, ?)";
+        String query = "INSERT INTO assignation (id_reservation, id_vehicule, heure_depart, heure_arrivee, kilometrage, id_hotel, nb_passagers_assignes) VALUES (?, ?, ?, ?, ?, ?, ?)";
 
         try (Connection conn = DatabaseConnection.getConnection();
                 PreparedStatement pstmt = conn.prepareStatement(query, Statement.RETURN_GENERATED_KEYS)) {
@@ -502,6 +667,7 @@ public class AssignationService {
             pstmt.setTimestamp(4, Timestamp.valueOf(heureArrivee));
             pstmt.setDouble(5, kilometrage);
             pstmt.setInt(6, idHotel);
+            pstmt.setInt(7, nbPassagersAssignes);
 
             pstmt.executeUpdate();
 
@@ -516,9 +682,29 @@ public class AssignationService {
                 assignation.setHeureArrivee(heureArrivee);
                 assignation.setKilometrage(kilometrage);
                 assignation.setIdHotel(idHotel);
+                assignation.setNbPassagersAssignes(nbPassagersAssignes);
                 return assignation;
             }
         }
+    }
+
+    private int getPassagersRestantsReservation(int idReservation) throws SQLException {
+        String query = "SELECT r.nbPassager - COALESCE(SUM(a.nb_passagers_assignes), 0) as restants " +
+                "FROM reservation r " +
+                "LEFT JOIN assignation a ON a.id_reservation = r.id_reservation " +
+                "WHERE r.id_reservation = ? " +
+                "GROUP BY r.nbPassager";
+
+        try (Connection conn = DatabaseConnection.getConnection();
+                PreparedStatement pstmt = conn.prepareStatement(query)) {
+            pstmt.setInt(1, idReservation);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    return Math.max(rs.getInt("restants"), 0);
+                }
+            }
+        }
+        return 0;
     }
 
     /**
@@ -533,15 +719,20 @@ public class AssignationService {
             throw new SQLException("Reservation introuvable: " + idReservation);
         }
 
+        int passagersRestants = getPassagersRestantsReservation(idReservation);
+        if (passagersRestants <= 0) {
+            throw new SQLException("Tous les passagers de la reservation sont deja assignes.");
+        }
+
         int capaciteRestante = getCapaciteRestante(idVehicule, date);
-        if (capaciteRestante < reservation.getNbPassager()) {
+        if (capaciteRestante < passagersRestants) {
             throw new SQLException("Capacite insuffisante! Le vehicule n'a que " +
                     capaciteRestante + " places restantes pour " +
-                    reservation.getNbPassager() + " passagers.");
+                    passagersRestants + " passagers restants.");
         }
 
         Map<Integer, Double> distancesMap = chargerDistancesDepuisAeroport();
-        double distanceKm = distancesMap.getOrDefault(reservation.getIdHotel(), 0.0);
+        double distanceKm = getDistanceAllerKm(reservation.getIdHotel(), distancesMap);
         Map<String, Integer> params = parametreService.getParametres();
         int vitesse = params.get("vitesse_moyenne");
 
@@ -559,17 +750,17 @@ public class AssignationService {
 
         double kilometrage = distanceKm * 2.0;
         int idHotel = reservation.getIdHotel();
-        enregistrerAssignation(idReservation, idVehicule, heureDepart, heureRetourAeroport, kilometrage, idHotel);
+        enregistrerAssignation(idReservation, idVehicule, heureDepart, heureRetourAeroport, kilometrage, idHotel,
+                passagersRestants);
     }
 
     /**
      * Recupere la capacite restante d'un vehicule pour une date
      */
     public int getCapaciteRestante(int idVehicule, LocalDate date) throws SQLException {
-        String query = "SELECT v.capacite - COALESCE(SUM(r.nbPassager), 0) as places_restantes " +
+        String query = "SELECT v.capacite - COALESCE(SUM(a.nb_passagers_assignes), 0) as places_restantes " +
                 "FROM vehicule v " +
                 "LEFT JOIN assignation a ON v.id_vehicule = a.id_vehicule AND DATE(a.heure_depart) = ? " +
-                "LEFT JOIN reservation r ON a.id_reservation = r.id_reservation " +
                 "WHERE v.id_vehicule = ? " +
                 "GROUP BY v.capacite";
 
@@ -598,14 +789,14 @@ public class AssignationService {
         String query = "SELECT a.heure_depart as heure_depart, " +
                 "MAX(a.heure_arrivee) as heure_retour_aeroport, " +
                 "COALESCE(MAX(a.kilometrage), 0) as kilometrage_parcouru, " +
-                "COUNT(a.id_reservation) as nb_reservations, " +
-                "SUM(r.nbPassager) as total_passagers, " +
+                "COUNT(DISTINCT a.id_reservation) as nb_reservations, " +
+                "SUM(a.nb_passagers_assignes) as total_passagers, " +
                 "COALESCE(a.id_hotel, r.id_hotel) as id_hotel, " +
                 "h.nom as hotel_nom, " +
                 "COUNT(DISTINCT a.id_vehicule) as nb_vehicules, " +
                 "STRING_AGG(DISTINCT (v.marque || ' ' || v.modele), ', ') as vehicules_utilises, " +
                 "STRING_AGG( " +
-                "  ('Res ' || r.id_reservation || ' (client ' || r.id_client || ', ' || r.nbPassager || ' pax, vol ' || TO_CHAR(r.dateHeure, 'HH24:MI') || ')'), "
+                "  ('Res ' || r.id_reservation || ' (client ' || r.id_client || ', ' || a.nb_passagers_assignes || ' pax assignes, vol ' || TO_CHAR(r.dateHeure, 'HH24:MI') || ')'), "
                 +
                 "  ' | ' ORDER BY r.dateHeure, r.id_reservation " +
                 ") as details_reservations " +
@@ -661,11 +852,11 @@ public class AssignationService {
      */
     public List<Assignation> getAssignationsByDate(LocalDate date) throws SQLException {
         List<Assignation> assignations = new ArrayList<>();
-        String query = "SELECT a.id_assignation, a.id_reservation, a.id_vehicule, a.heure_depart, a.heure_arrivee, a.kilometrage, a.id_hotel, "
+        String query = "SELECT a.id_assignation, a.id_reservation, a.id_vehicule, a.nb_passagers_assignes, a.heure_depart, a.heure_arrivee, a.kilometrage, a.id_hotel, "
                 +
                 "r.id_client, r.nbPassager, r.dateHeure, r.id_hotel, " +
                 "h.nom as hotel_nom, h.code as hotel_code, h.libelle as hotel_libelle, " +
-                "v.marque, v.modele, v.immatriculation, v.capacite, v.carburant " +
+                "v.marque, v.modele, v.immatriculation, v.capacite, v.carburant, v.heure_debut_disponibilite " +
                 "FROM assignation a " +
                 "JOIN reservation r ON a.id_reservation = r.id_reservation " +
                 "JOIN hotel h ON r.id_hotel = h.id_hotel " +
@@ -684,6 +875,7 @@ public class AssignationService {
                     assignation.setIdAssignation(rs.getInt("id_assignation"));
                     assignation.setIdReservation(rs.getInt("id_reservation"));
                     assignation.setIdVehicule(rs.getInt("id_vehicule"));
+                    assignation.setNbPassagersAssignes(rs.getInt("nb_passagers_assignes"));
                     assignation.setHeureDepart(rs.getTimestamp("heure_depart").toLocalDateTime());
                     assignation.setHeureArrivee(rs.getTimestamp("heure_arrivee").toLocalDateTime());
                     assignation.setKilometrage(rs.getDouble("kilometrage"));
@@ -711,6 +903,11 @@ public class AssignationService {
                     vehicule.setImmatriculation(rs.getString("immatriculation"));
                     vehicule.setCapacite(rs.getInt("capacite"));
                     vehicule.setCarburant(rs.getString("carburant"));
+                    java.sql.Time heureDisponibiliteSql = rs.getTime("heure_debut_disponibilite");
+                    LocalTime heureDisponibilite = heureDisponibiliteSql != null
+                            ? heureDisponibiliteSql.toLocalTime()
+                            : LocalTime.MIN;
+                    vehicule.setHeureDebutDisponibilite(heureDisponibilite);
                     assignation.setVehicule(vehicule);
 
                     assignations.add(assignation);

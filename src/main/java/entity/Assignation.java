@@ -6,6 +6,7 @@ public class Assignation {
     private int idAssignation;
     private int idReservation;
     private int idVehicule;
+    private int nbPassagersAssignes;
     private LocalDateTime heureDepart;
     private LocalDateTime heureArrivee;
     private double kilometrage;
@@ -38,6 +39,14 @@ public class Assignation {
 
     public void setIdVehicule(int idVehicule) {
         this.idVehicule = idVehicule;
+    }
+
+    public int getNbPassagersAssignes() {
+        return nbPassagersAssignes;
+    }
+
+    public void setNbPassagersAssignes(int nbPassagersAssignes) {
+        this.nbPassagersAssignes = nbPassagersAssignes;
     }
 
     public LocalDateTime getHeureDepart() {

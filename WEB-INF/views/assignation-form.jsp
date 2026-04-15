@@ -93,6 +93,7 @@
             <!-- Header -->
             <div class="header-section">
                 <h1><i class="fas fa-route"></i> Planification des Vehicules</h1>
+                <h1 style="font-size: 600;"> ETU003198 - ETU003083 - ETU003213</h1>
                 <p>Sprint 5-6 : Regroupement par temps d'attente + priorite par nombre de trajets</p>
             </div>
 
@@ -238,7 +239,7 @@
                 <% if (trajets != null && !trajets.isEmpty()) { %>
                 <div class="card">
                     <div class="card-header">
-                        <span><i class="fas fa-route me-2" style="color:#059669"></i> Trajets Planifies (Sprint 5-6)</span>
+                        <span><i class="fas fa-route me-2" style="color:#059669"></i> Trajets Planifies </span>
                         <span class="badge-places"><%= trajets.size() %> trajet(s)</span>
                     </div>
                     <div class="card-body">
@@ -252,7 +253,7 @@
                                 <div>
                                     <span class="trajet-vehicule">
                                         <i class="fas fa-bus me-2" style="color:#667eea"></i>
-                                        Trajet #<%= t.get("numeroTrajet") %> - Groupe Sprint 5
+                                        Trajet #<%= t.get("numeroTrajet") %> 
                                     </span>
                                     <span style="color:#9ba4b5; font-size:12px; margin-left:8px;">
                                         Destination: <%= t.get("hotel") %>
@@ -316,7 +317,10 @@
                                     <tr>
                                         <td><span class="badge-id">#<%= a.getIdAssignation() %></span></td>
                                         <td><strong><%= a.getReservation().getIdClient() %></strong></td>
-                                        <td><span class="badge-passagers"><%= a.getReservation().getNbPassager() %></span></td>
+                                        <td>
+                                            <span class="badge-passagers"><%= a.getNbPassagersAssignes() %> assignes</span>
+                                            <br><small style="color:#9ba4b5">/ <%= a.getReservation().getNbPassager() %> total reservation</small>
+                                        </td>
                                         <td>
                                             <span class="badge-hotel">
                                                 <i class="fas fa-map-marker-alt"></i>

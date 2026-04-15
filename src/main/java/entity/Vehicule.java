@@ -1,5 +1,7 @@
 package entity;
 
+import java.time.LocalTime;
+
 public class Vehicule {
     private int idVehicule;
     private String marque;
@@ -7,17 +9,32 @@ public class Vehicule {
     private String immatriculation;
     private int capacite;
     private String carburant; // "diesel" ou "essence"
+    private LocalTime heureDebutDisponibilite;
 
     public Vehicule() {
+        this.heureDebutDisponibilite = LocalTime.MIN;
     }
 
-    public Vehicule(int idVehicule, String marque, String modele, String immatriculation, int capacite, String carburant) {
+    public Vehicule(int idVehicule, String marque, String modele, String immatriculation, int capacite,
+            String carburant) {
         this.idVehicule = idVehicule;
         this.marque = marque;
         this.modele = modele;
         this.immatriculation = immatriculation;
         this.capacite = capacite;
         this.carburant = carburant;
+        this.heureDebutDisponibilite = LocalTime.MIN;
+    }
+
+    public Vehicule(int idVehicule, String marque, String modele, String immatriculation,
+            int capacite, String carburant, LocalTime heureDebutDisponibilite) {
+        this.idVehicule = idVehicule;
+        this.marque = marque;
+        this.modele = modele;
+        this.immatriculation = immatriculation;
+        this.capacite = capacite;
+        this.carburant = carburant;
+        this.heureDebutDisponibilite = heureDebutDisponibilite != null ? heureDebutDisponibilite : LocalTime.MIN;
     }
 
     public int getIdVehicule() {
@@ -68,6 +85,14 @@ public class Vehicule {
         this.carburant = carburant;
     }
 
+    public LocalTime getHeureDebutDisponibilite() {
+        return heureDebutDisponibilite;
+    }
+
+    public void setHeureDebutDisponibilite(LocalTime heureDebutDisponibilite) {
+        this.heureDebutDisponibilite = heureDebutDisponibilite != null ? heureDebutDisponibilite : LocalTime.MIN;
+    }
+
     @Override
     public String toString() {
         return "Vehicule{" +
@@ -77,6 +102,7 @@ public class Vehicule {
                 ", immatriculation='" + immatriculation + '\'' +
                 ", capacite=" + capacite +
                 ", carburant='" + carburant + '\'' +
+                ", heureDebutDisponibilite=" + heureDebutDisponibilite +
                 '}';
     }
 }

@@ -6,6 +6,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -15,7 +16,9 @@ public class VehiculeService {
 
     public List<Vehicule> getAllVehicules() throws SQLException {
         List<Vehicule> vehicules = new ArrayList<>();
-        String query = "SELECT id_vehicule, marque, modele, immatriculation, capacite, carburant FROM vehicule ORDER BY capacite";
+        String query = "SELECT id_vehicule, marque, modele, immatriculation, capacite, carburant, heure_debut_disponibilite "
+                +
+                "FROM vehicule ORDER BY capacite";
 
         try (Connection conn = DatabaseConnection.getConnection();
                 Statement stmt = conn.createStatement();
@@ -29,6 +32,11 @@ public class VehiculeService {
                 v.setImmatriculation(rs.getString("immatriculation"));
                 v.setCapacite(rs.getInt("capacite"));
                 v.setCarburant(rs.getString("carburant"));
+                java.sql.Time heureDisponibiliteSql = rs.getTime("heure_debut_disponibilite");
+                LocalTime heureDisponibilite = heureDisponibiliteSql != null
+                        ? heureDisponibiliteSql.toLocalTime()
+                        : LocalTime.MIN;
+                v.setHeureDebutDisponibilite(heureDisponibilite);
                 vehicules.add(v);
             }
         }
@@ -45,7 +53,8 @@ public class VehiculeService {
      * 4. Si encore égalité Diesel : random (via ORDER BY RANDOM())
      */
     public Vehicule trouverMeilleurVehicule(int nbPassager) throws SQLException {
-        String query = "SELECT id_vehicule, marque, modele, immatriculation, capacite, carburant " +
+        String query = "SELECT id_vehicule, marque, modele, immatriculation, capacite, carburant, heure_debut_disponibilite "
+                +
                 "FROM vehicule " +
                 "WHERE capacite >= ? " +
                 "ORDER BY capacite ASC, " +
@@ -67,6 +76,11 @@ public class VehiculeService {
                     v.setImmatriculation(rs.getString("immatriculation"));
                     v.setCapacite(rs.getInt("capacite"));
                     v.setCarburant(rs.getString("carburant"));
+                    java.sql.Time heureDisponibiliteSql = rs.getTime("heure_debut_disponibilite");
+                    LocalTime heureDisponibilite = heureDisponibiliteSql != null
+                            ? heureDisponibiliteSql.toLocalTime()
+                            : LocalTime.MIN;
+                    v.setHeureDebutDisponibilite(heureDisponibilite);
                     return v;
                 }
             }
@@ -82,12 +96,14 @@ public class VehiculeService {
      * dépassée
      */
     public Vehicule trouverMeilleurVehiculeDisponible(int nbPassager, LocalDate date) throws SQLException {
-        String query = "SELECT v.id_vehicule, v.marque, v.modele, v.immatriculation, v.capacite, v.carburant, " +
+        String query = "SELECT v.id_vehicule, v.marque, v.modele, v.immatriculation, v.capacite, v.carburant, v.heure_debut_disponibilite, "
+                +
                 "(v.capacite - COALESCE(SUM(r.nbPassager), 0)) as places_restantes " +
                 "FROM vehicule v " +
                 "LEFT JOIN assignation a ON v.id_vehicule = a.id_vehicule AND DATE(a.heure_depart) = ? " +
                 "LEFT JOIN reservation r ON a.id_reservation = r.id_reservation " +
-                "GROUP BY v.id_vehicule, v.marque, v.modele, v.immatriculation, v.capacite, v.carburant " +
+                "GROUP BY v.id_vehicule, v.marque, v.modele, v.immatriculation, v.capacite, v.carburant, v.heure_debut_disponibilite "
+                +
                 "HAVING (v.capacite - COALESCE(SUM(r.nbPassager), 0)) >= ? " +
                 "ORDER BY (v.capacite - COALESCE(SUM(r.nbPassager), 0)) ASC, " +
                 "CASE WHEN v.carburant = 'diesel' THEN 0 ELSE 1 END ASC, " +
@@ -109,6 +125,11 @@ public class VehiculeService {
                     v.setImmatriculation(rs.getString("immatriculation"));
                     v.setCapacite(rs.getInt("capacite"));
                     v.setCarburant(rs.getString("carburant"));
+                    java.sql.Time heureDisponibiliteSql = rs.getTime("heure_debut_disponibilite");
+                    LocalTime heureDisponibilite = heureDisponibiliteSql != null
+                            ? heureDisponibiliteSql.toLocalTime()
+                            : LocalTime.MIN;
+                    v.setHeureDebutDisponibilite(heureDisponibilite);
                     return v;
                 }
             }

@@ -81,6 +81,11 @@
         }
         .btn-back:hover { color: white; transform: translateY(-2px); box-shadow: 0 6px 20px rgba(102, 126, 234, 0.45); }
 
+        .progress-bar-dynamic { border-radius: 4px; }
+        .progress-fill-high { background: #dc3545; }
+        .progress-fill-medium { background: #ffc107; }
+        .progress-fill-low { background: #28a745; }
+
         .empty-state { text-align: center; padding: 48px 24px; color: #9ba4b5; }
         .empty-state i { font-size: 48px; margin-bottom: 16px; color: #d1d5db; }
 
@@ -252,11 +257,12 @@
                     Assignation first = vehiculeAssignations.get(0);
                     int totalPassagers = 0;
                     for (Assignation a : vehiculeAssignations) {
-                        totalPassagers += a.getReservation().getNbPassager();
+                        totalPassagers += a.getNbPassagersAssignes();
                     }
                     int capacite = first.getVehicule().getCapacite();
                     int placesRestantes = capacite - totalPassagers;
                     int pourcentage = (capacite > 0) ? (totalPassagers * 100 / capacite) : 0;
+                    String fillClass = pourcentage > 80 ? "progress-fill-high" : pourcentage > 50 ? "progress-fill-medium" : "progress-fill-low";
                 %>
                 <div class="trajet-group">
                     <div class="trajet-group-header">
@@ -293,7 +299,7 @@
                             <tr>
                                 <td><span class="badge-custom badge-id">#<%= a.getIdAssignation() %></span></td>
                                 <td><strong><%= a.getReservation().getIdClient() %></strong></td>
-                                <td><%= a.getReservation().getNbPassager() %></td>
+                                <td><%= a.getNbPassagersAssignes() %> / <%= a.getReservation().getNbPassager() %></td>
                                 <td>
                                     <span class="badge-hotel">
                                         <i class="fas fa-map-marker-alt"></i>
@@ -308,7 +314,7 @@
                     </table>
                     <div style="padding:12px 22px;">
                         <div class="progress" style="height:8px; border-radius:4px;">
-                            <div class="progress-bar" style="width:<%= pourcentage %>%; background:<%= pourcentage > 80 ? "#dc3545" : pourcentage > 50 ? "#ffc107" : "#28a745" %>; border-radius:4px;"></div>
+                            <div class="progress-bar progress-bar-dynamic <%= fillClass %>" data-width="<%= pourcentage %>"></div>
                         </div>
                         <small style="color:#9ba4b5; font-size:11px;">Remplissage : <%= pourcentage %>%</small>
                     </div>
@@ -346,7 +352,7 @@
                         <tr>
                             <td><span class="badge-custom badge-id">#<%= a.getIdAssignation() %></span></td>
                             <td><strong><%= a.getReservation().getIdClient() %></strong></td>
-                            <td><%= a.getReservation().getNbPassager() %></td>
+                            <td><%= a.getNbPassagersAssignes() %> / <%= a.getReservation().getNbPassager() %></td>
                             <td>
                                 <span class="badge-hotel">
                                     <i class="fas fa-map-marker-alt"></i>
@@ -390,5 +396,14 @@
         </a>
     </div>
 </div>
+<script>
+    document.querySelectorAll('.progress-bar-dynamic').forEach(function (el) {
+        var width = parseInt(el.getAttribute('data-width') || '0', 10);
+        if (isNaN(width)) width = 0;
+        if (width < 0) width = 0;
+        if (width > 100) width = 100;
+        el.style.width = width + '%';
+    });
+</script>
 </body>
 </html>
