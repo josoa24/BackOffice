@@ -304,6 +304,10 @@
                 <span class="nav-icon"><i class="fas fa-th-large"></i></span>
                 <span class="nav-text">Tableau de Bord</span>
             </a>
+                <a href="${pageContext.request.contextPath}/reservation-list" class="nav-link <%= "reservation-list".equals(currentPage) ? "active" : "" %>">
+                    <span class="nav-icon"><i class="fas fa-list"></i></span>
+                    <span class="nav-text">Reservation List</span>
+                </a>
             <a href="${pageContext.request.contextPath}/reservation-form" class="nav-link <%= "reservation".equals(currentPage) ? "active" : "" %>">
                 <span class="nav-icon"><i class="fas fa-calendar-check"></i></span>
                 <span class="nav-text">Réservations</span>

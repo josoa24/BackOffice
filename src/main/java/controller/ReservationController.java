@@ -22,7 +22,7 @@ import main.framework.ModelView;
 
 @ControllerAnnotation
 public class ReservationController {
-    
+
     private HotelService hotelService = new HotelService();
     private ReservationService reservationService = new ReservationService();
     private TokenService tokenService = new TokenService();
@@ -32,7 +32,7 @@ public class ReservationController {
     public ModelView afficherFormulaireReservation() {
         ModelView mv = new ModelView();
         mv.setView("reservation-form.jsp");
-        
+
         try {
             List<Hotel> hotels = hotelService.getAllHotels();
             mv.setData("hotels", hotels);
@@ -40,7 +40,7 @@ public class ReservationController {
             mv.setData("error", "Erreur lors du chargement des hôtels: " + e.getMessage());
             mv.setData("hotels", new ArrayList<Hotel>());
         }
-        
+
         return mv;
     }
 
@@ -51,7 +51,7 @@ public class ReservationController {
             @RequestParam(paramName = "nbPassager") int nbPassager,
             @RequestParam(paramName = "dateHeure") String dateHeure,
             @RequestParam(paramName = "idHotel") int idHotel) {
-        
+
         try {
             DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm");
             LocalDateTime dateTime = LocalDateTime.parse(dateHeure, formatter);
@@ -90,7 +90,7 @@ public class ReservationController {
     @UrlAnnotation(url = "/api/reservations")
     public ModelView getAllReservations(@RequestParam(paramName = "token") String token) {
         ModelView mv = new ModelView();
-        
+
         try {
             // Vérification du token
             Token validToken = tokenService.validateToken(token);
@@ -113,7 +113,7 @@ public class ReservationController {
             mv.setData("reservations", new ArrayList<Reservation>());
             mv.setData("count", 0);
         }
-        
+
         return mv;
     }
 
@@ -124,7 +124,7 @@ public class ReservationController {
             @RequestParam(paramName = "date") String date,
             @RequestParam(paramName = "token") String token) {
         ModelView mv = new ModelView();
-        
+
         try {
             // Vérification du token
             Token validToken = tokenService.validateToken(token);
@@ -150,17 +150,26 @@ public class ReservationController {
             mv.setData("reservations", new ArrayList<Reservation>());
             mv.setData("count", 0);
         }
-        
+
         return mv;
     }
 
     @main.annotation.Json
     @GetMapping
     @UrlAnnotation(url = "/api/token/generate")
-    public ModelView generateToken(@RequestParam(paramName = "idClient") int idClient) {
+    public ModelView generateToken(@RequestParam(paramName = "idClient") Integer idClient) {
         ModelView mv = new ModelView();
-        
+
         try {
+            if (idClient == null) {
+                mv.setData("error", "Paramètre idClient manquant");
+                return mv;
+            }
+            if (idClient < 1000 || idClient > 9999) {
+                mv.setData("error", "idClient doit être entre 1000 et 9999");
+                return mv;
+            }
+
             // Génère un token valide pendant 30 minutes
             Token token = tokenService.generateToken(idClient, 30);
             mv.setData("token", token.getToken());
@@ -170,7 +179,7 @@ public class ReservationController {
         } catch (Exception e) {
             mv.setData("error", "Erreur lors de la génération du token: " + e.getMessage());
         }
-        
+
         return mv;
     }
 
@@ -179,7 +188,7 @@ public class ReservationController {
     @UrlAnnotation(url = "/api/token/validate")
     public ModelView validateToken(@RequestParam(paramName = "token") String tokenValue) {
         ModelView mv = new ModelView();
-        
+
         try {
             Token token = tokenService.validateToken(tokenValue);
             if (token != null) {
@@ -198,7 +207,25 @@ public class ReservationController {
             mv.setData("error", "Erreur: " + e.getMessage());
             mv.setData("valid", false);
         }
-        
+
+        return mv;
+    }
+
+    @GetMapping
+    @UrlAnnotation(url = "/reservation-list")
+    public ModelView afficherListeReservations() {
+        ModelView mv = new ModelView();
+        mv.setView("reservation-list.jsp");
+        try {
+            List<Reservation> reservations = reservationService.getAllReservations();
+            List<Hotel> hotels = hotelService.getAllHotels();
+            mv.setData("reservations", reservations);
+            mv.setData("hotels", hotels);
+        } catch (Exception e) {
+            mv.setData("error", "Erreur lors du chargement des réservations: " + e.getMessage());
+            mv.setData("reservations", new ArrayList<Reservation>());
+            mv.setData("hotels", new ArrayList<Hotel>());
+        }
         return mv;
     }
 }

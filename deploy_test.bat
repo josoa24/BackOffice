@@ -1,13 +1,13 @@
 @echo off
 setlocal EnableDelayedExpansion
 
-set SOURCE_DIR=D:\ITU\S5\Mr_Naina\BackOffice
+set SOURCE_DIR=D:\ITU\S5\MrNAINA\RESERVATION_VOITURE\BackOffice
 set SRC_JAVA=%SOURCE_DIR%\src\main\java
 set WEBINF=%SOURCE_DIR%\WEB-INF
 set LIB_DIR=%SOURCE_DIR%\lib
 set BUILD_TEMP=build-war-temp
 set WAR_NAME=BackOffice.war
-set DEST_DIR=D:\apache\webapps
+set DEST_DIR=D:\ITU\Tomcat\apache-tomcat-10.1.34\webapps
 set SOURCES_FILE=java_all.txt
 set DEPLOY_DIR=%DEST_DIR%\BackOffice
 
